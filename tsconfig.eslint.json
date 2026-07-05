@@ -1,8 +1,17 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "noEmit": true
+    "noEmit": true,
+    "allowJs": true
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "*.ts", "*.cts", "*.mts"],
+  "include": [
+    "src/**/*.ts",
+    "tests/**/*.ts",
+    "*.ts",
+    "*.cts",
+    "*.mts",
+    "*.cjs",
+    ".eslintrc.cjs"
+  ],
   "exclude": ["dist", "node_modules"]
 }
