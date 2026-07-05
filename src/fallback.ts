@@ -1,11 +1,6 @@
 // src/fallback.ts
 export type FailureKind =
-  | 'transient'
-  | 'rate_limit'
-  | 'auth'
-  | 'model_unavailable'
-  | 'timeout'
-  | 'crash';
+  'transient' | 'rate_limit' | 'auth' | 'model_unavailable' | 'timeout' | 'crash';
 
 export type Action =
   | { readonly type: 'retry' }
