@@ -171,10 +171,15 @@ timeout  = "45m"
 
 [default]                  # uncertain → conservative
 class = "implementation"
+
+[limits]                   # ladder guards live here, alongside timeouts
+max_attempts_per_task = 4  # global attempt budget → cannot loop-burn accounts
 ```
 
 Three task classes at launch: `mechanical`, `implementation`, `hard`. More can
-be added later if a real need appears.
+be added later if a real need appears. The per-task attempt budget (fallback
+ladder) lives in `[limits]` here, next to the per-class timeouts, so all
+consumption controls sit in one file.
 
 ### Effort modulation
 
@@ -219,7 +224,11 @@ forever, never stacks half-done work.
   edits.
 - **Respect multi-auth cooldown/budget-guards:** never hammer a limited account.
 - **Per-task ledger:** every rung taken is logged (which account, which model,
-  why it fell back) for cost/behavior visibility.
+  why it fell back) for cost/behavior visibility. The ledger lives in local
+  config (`.codex-delegate.local/ledger.jsonl`, gitignored, never in the public
+  repo) and records only metadata — account label, model id, class, rung,
+  timestamps, exit status. It **never** records prompt bodies, diffs, or secret
+  values (consistent with the secret-redaction guard).
 
 ### Rate-limit detection
 
@@ -261,7 +270,22 @@ Code Desktop and CLI; installable via marketplace/git. Contains:
   generic protected-path deny-list, verify hooks);
 - a **`doctor`/setup command** checking dependencies (codex? codex-multi-auth?
   accounts logged in? policy present?) and guiding installation on gaps — this
-  is the plug-and-play piece.
+  is the plug-and-play piece. On any failed check it emits a table of
+  `check → status (ok/missing/misconfigured) → exact remediation command`
+  (e.g. `npm i -g @openai/codex`), and exits non-zero if any hard dependency is
+  missing so the skill can refuse to run until `doctor` is green.
+
+### Config file inventory
+
+| File | Location | Committed to public repo? | Purpose / schema |
+|---|---|---|---|
+| `model-policy.toml` | plugin root (template) → user copies/edits | Template yes; user's edits local | `[models.*]`, `[classes.*]`, `[default]`, `[limits]` — model/effort/fallback/timeouts + attempt budget |
+| `protected-paths.toml` | plugin root (generic defaults) + `.codex-delegate.local/` (user extensions) | Generic defaults yes; user extensions no | Deny-list of paths Codex must never touch |
+| `verify.toml` | `.codex-delegate.local/` (optional) | No | Pluggable verify: maps repo → canonical check commands; absent → degrade to `git status` + auto-detected lint/test |
+| `ledger.jsonl` | `.codex-delegate.local/` | No (gitignored) | Per-task metadata log; never secrets |
+
+The `.codex-delegate.local/` directory holds everything user- and
+project-specific and is gitignored, keeping the public repo generic.
 
 **Generic/local separation (hygiene + no-leak):** the generic skill never
 hard-codes project paths or a project-specific deny-list. Project specifics live
