@@ -1,6 +1,8 @@
 import { parse } from 'smol-toml';
 import { parseDurationMs } from './duration.js';
-import type { ModelPolicy, ResolvedModel } from './types.js';
+import type { Effort, ModelPolicy, ResolvedModel, TaskClassConfig } from './types.js';
+
+const EFFORTS = new Set<Effort>(['minimal', 'low', 'medium', 'high', 'xhigh']);
 
 export function loadModelPolicy(toml: string): ModelPolicy {
   const raw = parse(toml) as unknown as Partial<ModelPolicy>;
@@ -11,10 +13,27 @@ export function loadModelPolicy(toml: string): ModelPolicy {
     throw new Error('policy missing [limits] maxAttemptsPerTask');
   }
   const modelIds = new Set(Object.keys(raw.models));
-  for (const [name, cfg] of Object.entries(raw.classes)) {
-    for (const id of [cfg.model, ...cfg.fallback]) {
-      if (!modelIds.has(id)) {
-        throw new Error(`class "${name}" references unknown model "${id}"`);
+  for (const [name, cfg] of Object.entries(raw.classes) as Array<
+    [string, Partial<TaskClassConfig>]
+  >) {
+    const model: unknown = cfg.model;
+    if (typeof model !== 'string') {
+      throw new Error(`class "${name}" missing model`);
+    }
+    const fallback: unknown = cfg.fallback;
+    if (!Array.isArray(fallback)) {
+      throw new Error(`class "${name}" missing fallback array`);
+    }
+    if (typeof cfg.timeout !== 'string') {
+      throw new Error(`class "${name}" missing timeout`);
+    }
+    if (!EFFORTS.has(cfg.effort as Effort)) {
+      throw new Error(`class "${name}" has invalid effort "${String(cfg.effort)}"`);
+    }
+    const ids: unknown[] = [model, ...(fallback as unknown[])];
+    for (const id of ids) {
+      if (typeof id !== 'string' || !modelIds.has(id)) {
+        throw new Error(`class "${name}" references unknown model "${String(id)}"`);
       }
     }
   }

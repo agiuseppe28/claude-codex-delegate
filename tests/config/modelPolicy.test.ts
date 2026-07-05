@@ -30,6 +30,16 @@ describe('loadModelPolicy', () => {
     const bad = toml.replace(/\[limits\][\s\S]*$/, '');
     expect(() => loadModelPolicy(bad)).toThrow(/maxAttemptsPerTask/);
   });
+
+  it('rejects a class missing its fallback array', () => {
+    const bad = toml.replace('fallback = ["flagship-x", "general-x"]\n', '');
+    expect(() => loadModelPolicy(bad)).toThrow(/fallback/);
+  });
+
+  it('rejects a class with an invalid effort', () => {
+    const bad = toml.replace('effort = "low"', 'effort = "banana"');
+    expect(() => loadModelPolicy(bad)).toThrow(/invalid effort/);
+  });
 });
 
 describe('resolve', () => {
