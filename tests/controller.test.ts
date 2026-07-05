@@ -32,6 +32,7 @@ function collaborators(over: Record<string, unknown> = {}): Record<string, unkno
     multiAuth: {
       hasOtherHealthy: vi.fn(() => Promise.resolve(true)),
       switchToNextHealthy: vi.fn(() => Promise.resolve()),
+      currentAccount: vi.fn(() => Promise.resolve('account-0')),
     },
     verifier: {
       verify: vi.fn(() =>
@@ -60,6 +61,15 @@ describe('Controller', () => {
     const out = await new Controller(c as never).delegate(spec, policy);
     expect(out.status).toBe('done');
     expect(c.executor.run).toHaveBeenCalledOnce();
+  });
+
+  it('records the real current account label in the ledger, not a hardcoded placeholder', async () => {
+    const c = collaborators();
+    await new Controller(c as never).delegate(spec, policy);
+    const ledger = c.ledger as { record: ReturnType<typeof vi.fn> };
+    expect(ledger.record).toHaveBeenCalledWith(
+      expect.objectContaining({ account: 'account-0' }),
+    );
   });
 
   it('switches account on a rate-limit, then succeeds', async () => {
@@ -151,6 +161,7 @@ describe('Controller', () => {
     const multiAuth = {
       hasOtherHealthy: vi.fn(() => Promise.resolve(false)),
       switchToNextHealthy: vi.fn(),
+      currentAccount: vi.fn(() => Promise.resolve('account-0')),
     };
     const c = collaborators({ executor, multiAuth });
     const out = await new Controller(c as never).delegate(spec, policy);

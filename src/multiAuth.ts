@@ -1,13 +1,11 @@
 // src/multiAuth.ts
 import type { Runner } from './exec/run.js';
 
-export interface Account {
-  readonly label: string;
-  readonly healthy: boolean;
-}
 export interface Status {
-  readonly active?: string;
-  readonly accounts: readonly Account[];
+  readonly accountCount: number;
+  readonly activeIndex: number | null;
+  readonly recommendedIndex: number | null;
+  readonly runtimeInUseIndex: number | null;
 }
 
 const BIN = 'codex-multi-auth';
@@ -18,18 +16,45 @@ export class MultiAuth {
   async status(): Promise<Status> {
     const out = await this.run(BIN, ['status', '--json']);
     try {
-      return JSON.parse(out.stdout) as Status;
+      const raw = JSON.parse(out.stdout) as Partial<Status>;
+      return {
+        accountCount: raw.accountCount ?? 0,
+        activeIndex: raw.activeIndex ?? null,
+        recommendedIndex: raw.recommendedIndex ?? null,
+        runtimeInUseIndex: raw.runtimeInUseIndex ?? null,
+      };
     } catch {
-      return { accounts: [] }; // unparseable output → treat as no healthy accounts
+      // unparseable output → treat as no accounts available
+      return {
+        accountCount: 0,
+        activeIndex: null,
+        recommendedIndex: null,
+        runtimeInUseIndex: null,
+      };
     }
   }
 
+  // A different, healthier account is available to switch to.
   async hasOtherHealthy(): Promise<boolean> {
     const s = await this.status();
-    return s.accounts.some((a) => a.healthy && a.label !== s.active);
+    const current = s.runtimeInUseIndex ?? s.activeIndex;
+    return (
+      s.accountCount >= 2 && s.recommendedIndex !== null && s.recommendedIndex !== current
+    );
   }
 
   async switchToNextHealthy(): Promise<void> {
-    await this.run(BIN, ['switch', '--next-healthy'], { timeoutMs: 30_000 });
+    const s = await this.status();
+    if (s.recommendedIndex !== null) {
+      await this.run(BIN, ['switch', String(s.recommendedIndex)], { timeoutMs: 30_000 });
+    }
+  }
+
+  // Label for the ledger (Chunk 7 carry-over). Index-based until we can
+  // inspect account objects post-login.
+  async currentAccount(): Promise<string> {
+    const s = await this.status();
+    const idx = s.runtimeInUseIndex ?? s.activeIndex;
+    return idx === null ? 'unknown' : `account-${idx}`;
   }
 }

@@ -9,7 +9,10 @@ export interface RawResult {
 
 const SIGNATURES: ReadonlyArray<readonly [RegExp, FailureKind]> = [
   [/rate.?limit|429|usage limit|quota/i, 'rate_limit'],
-  [/401|403|unauthorized|invalid.*(token|api key)|auth/i, 'auth'],
+  [
+    /401|403|unauthorized|invalid.*(token|api key)|\bauth(entication|orization)?\b|unauthenticated/i,
+    'auth',
+  ],
   [/model.*(not found|unavailable|deprecated|does not exist)/i, 'model_unavailable'],
   [/network|ECONNRESET|ETIMEDOUT|502|503|temporar/i, 'transient'],
 ];

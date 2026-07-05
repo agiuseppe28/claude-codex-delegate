@@ -23,6 +23,22 @@ describe('classifyFailure', () => {
     expect(
       classifyFailure({ exitCode: 1, stderr: '401 Unauthorized', timedOut: false }),
     ).toBe('auth'));
+  it('detects "authentication failed" as auth', () =>
+    expect(
+      classifyFailure({
+        exitCode: 1,
+        stderr: 'authentication failed',
+        timedOut: false,
+      }),
+    ).toBe('auth'));
+  it('does not misclassify "authored by" as auth (false positive on bare "auth")', () =>
+    expect(
+      classifyFailure({
+        exitCode: 1,
+        stderr: 'this commit was authored by someone else',
+        timedOut: false,
+      }),
+    ).toBe('crash'));
   it('detects unavailable model', () =>
     expect(
       classifyFailure({ exitCode: 1, stderr: 'model gpt-x not found', timedOut: false }),

@@ -15,6 +15,7 @@ export interface Collaborators {
   multiAuth: {
     hasOtherHealthy(): Promise<boolean>;
     switchToNextHealthy(): Promise<void>;
+    currentAccount(): Promise<string>;
   };
   verifier: { verify(req: VerifyRequest): Promise<Verdict> };
   ledger: { record(e: LedgerEntry): void };
@@ -60,7 +61,7 @@ export class Controller {
         });
         this.c.ledger.record({
           taskId: spec.taskId,
-          account: 'active',
+          account: await this.c.multiAuth.currentAccount(),
           model,
           taskClass: spec.taskClass,
           rung: 'execute',
@@ -90,7 +91,7 @@ export class Controller {
       const action = nextAction(state, failure);
       this.c.ledger.record({
         taskId: spec.taskId,
-        account: 'active',
+        account: await this.c.multiAuth.currentAccount(),
         model,
         taskClass: spec.taskClass,
         rung: action.type,
