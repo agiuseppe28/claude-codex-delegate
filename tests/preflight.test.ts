@@ -54,11 +54,15 @@ describe('validateDelegationSpec', () => {
   it('accepts a well-formed spec', () =>
     expect(() => validateDelegationSpec(good)).not.toThrow());
   it('rejects an empty whitelist (primary guard)', () =>
-    expect(() => validateDelegationSpec({ ...good, whitelist: [] })).toThrow(/whitelist/));
+    expect(() => validateDelegationSpec({ ...good, whitelist: [] })).toThrow(
+      /whitelist/,
+    ));
   it('rejects a relative repoPath', () =>
-    expect(() => validateDelegationSpec({ ...good, repoPath: 'repo' })).toThrow(/absolute/));
+    expect(() => validateDelegationSpec({ ...good, repoPath: 'repo' })).toThrow(
+      /absolute/,
+    ));
   it('rejects a missing completion criterion', () =>
-    expect(() =>
-      validateDelegationSpec({ ...good, completionCriterion: '' }),
-    ).toThrow(/completionCriterion/));
+    expect(() => validateDelegationSpec({ ...good, completionCriterion: '' })).toThrow(
+      /completionCriterion/,
+    ));
 });

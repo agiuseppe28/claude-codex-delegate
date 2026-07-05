@@ -15,7 +15,8 @@ export interface PreflightResult {
 }
 
 export function evaluatePreflight(input: PreflightInput): PreflightResult {
-  if (!input.isGitRepo) return { decision: 'abort', reason: 'target is not a git repository' };
+  if (!input.isGitRepo)
+    return { decision: 'abort', reason: 'target is not a git repository' };
   const protectedInWhitelist = input.whitelist.filter(input.isProtected);
   if (protectedInWhitelist.length > 0)
     return {
@@ -23,7 +24,10 @@ export function evaluatePreflight(input: PreflightInput): PreflightResult {
       reason: `protected path in whitelist: ${protectedInWhitelist.join(', ')}`,
     };
   if (input.dirtyPaths.length > 0)
-    return { decision: 'ask', reason: `uncommitted changes present: ${input.dirtyPaths.join(', ')}` };
+    return {
+      decision: 'ask',
+      reason: `uncommitted changes present: ${input.dirtyPaths.join(', ')}`,
+    };
   return { decision: 'proceed', reason: 'clean' };
 }
 
