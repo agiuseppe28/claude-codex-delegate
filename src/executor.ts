@@ -47,21 +47,24 @@ export class Executor {
       effort: req.effort,
       outputFile,
     });
-    const outcome = await this.runner('codex', args, {
-      cwd: req.repoPath,
-      timeoutMs: req.timeoutMs,
-    });
-    const report = this.readOutput(outputFile);
     try {
-      rmSync(outputFile, { force: true });
-    } catch {
-      /* best effort */
+      const outcome = await this.runner('codex', args, {
+        cwd: req.repoPath,
+        timeoutMs: req.timeoutMs,
+      });
+      const report = this.readOutput(outputFile);
+      return {
+        exitCode: outcome.exitCode,
+        stderr: outcome.stderr,
+        report,
+        timedOut: outcome.timedOut,
+      };
+    } finally {
+      try {
+        rmSync(outputFile, { force: true });
+      } catch {
+        /* best effort */
+      }
     }
-    return {
-      exitCode: outcome.exitCode,
-      stderr: outcome.stderr,
-      report,
-      timedOut: outcome.timedOut,
-    };
   }
 }

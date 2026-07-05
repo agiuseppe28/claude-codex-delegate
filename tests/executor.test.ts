@@ -40,4 +40,23 @@ describe('Executor', () => {
     });
     expect(res.timedOut).toBe(true);
   });
+
+  it('returns an empty report alongside a failing exit code when the output file is missing', async () => {
+    const runner = vi.fn(() =>
+      Promise.resolve({ exitCode: 1, stdout: '', stderr: 'boom', timedOut: false }),
+    );
+    const readOutput = vi.fn(() => '');
+    const ex = new Executor(runner, readOutput);
+
+    const res = await ex.run({
+      prompt: 'p',
+      repoPath: '/r',
+      model: 'm',
+      effort: 'low',
+      timeoutMs: 600_000,
+    });
+
+    expect(res.exitCode).toBe(1);
+    expect(res.report).toBe('');
+  });
 });
