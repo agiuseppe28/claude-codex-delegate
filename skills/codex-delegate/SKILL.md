@@ -28,15 +28,26 @@ setup — the CLI will simply fail preflight or crash mid-run.
 
 ### 2. Classify the task
 
+The policy is flagship-first: one flagship model handles every class, and
+classifying the task only picks how much **effort** it runs at (low/medium/
+high). You are not choosing a model — you are choosing an effort level. Do
+NOT pick a different, cheaper model for "easy" tasks; that's not the policy
+and there is no real advantage to it. A different model only ever appears as
+an automatic, rare fallback inside the ladder when the flagship itself is
+unavailable — never as a manual choice you make here.
+
 Pick exactly one task class from `model-policy.toml`:
 
 - **`mechanical`** — rename a symbol, apply a known diff, move a file, fix a
   lint error, add a documented boilerplate block. No design judgment needed.
+  → low effort.
 - **`implementation`** — build a feature, write tests against a spec, do a
-  guided refactor. Some judgment, but the target is well-defined.
+  guided refactor. Some judgment, but the target is well-defined. → medium
+  effort.
 - **`hard`** — a tough, ambiguous bug or heavy-reasoning task. Only delegate
   this class when the task is still fully specifiable in writing; if it needs
-  back-and-forth exploration, do NOT delegate (see "When NOT to delegate").
+  back-and-forth exploration, do NOT delegate (see "When NOT to delegate"). →
+  high effort.
 
 The class picks the model, effort, and timeout from `model-policy.toml` — you
 never specify those directly.

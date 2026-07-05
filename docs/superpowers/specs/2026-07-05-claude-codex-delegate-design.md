@@ -146,29 +146,36 @@ other repos, no protected data, no secrets in logs.
 
 ### `model-policy.toml` — single source of truth
 
-All "which model, how much effort" knowledge lives in one declarative file.
-Adding a new model = editing one line; the rest of the plugin never changes.
+Flagship-first, not tiered models: run ONE flagship model and modulate
+**effort** (low/medium/high) per task class. Cheaper/older tiers have no real
+advantage for this workload — many only support `medium` effort anyway — and
+`-pro` variants are avoided outright (cost). A different model appears only as
+a rare, explicit fallback for when the flagship itself is unavailable, not as
+a routine cost/quality lever. Adding a new flagship = editing one line (plus
+bumping the fallback if it changes too); the rest of the plugin never changes.
 
 ```toml
-[models.<model-id>]        # exact id = the updatable part
-tier = "flagship" | "fast" | "general"
+[models."<flagship-id>"]   # exact id = the updatable part; quote dotted ids
+tier = "flagship"
+[models."<fallback-id>"]   # rare fallback only: used if the flagship is unavailable
+tier = "general"
 
 [classes.mechanical]       # mechanical edits, apply-diff, rename
-model    = "<fast model>"
+model    = "<flagship-id>"
 effort   = "low"           # trivial task → low effort → less consumption
-fallback = ["<flagship>", "<general>"]
+fallback = ["<fallback-id>"]
 timeout  = "10m"
 
 [classes.implementation]   # feature, guided refactor, writing tests
-model    = "<flagship>"
+model    = "<flagship-id>"
 effort   = "medium"
-fallback = ["<general>", "<fast>"]
+fallback = ["<fallback-id>"]
 timeout  = "30m"
 
 [classes.hard]             # tough bugs, heavy reasoning
-model    = "<flagship>"
+model    = "<flagship-id>"
 effort   = "high"
-fallback = ["<general>"]
+fallback = ["<fallback-id>"]
 timeout  = "45m"
 
 [default]                  # uncertain → conservative
@@ -182,6 +189,11 @@ Three task classes at launch: `mechanical`, `implementation`, `hard`. More can
 be added later if a real need appears. The per-task attempt budget (fallback
 ladder) lives in `[limits]` here, next to the per-class timeouts, so all
 consumption controls sit in one file.
+
+Note: TOML table keys containing a dot (e.g. `gpt-5.5`) MUST be quoted —
+`[models."gpt-5.5"]`, not `[models.gpt-5.5]` — otherwise the parser reads the
+dot as a nested-table separator and silently produces the wrong structure.
+`tests/config/template.test.ts` guards the shipped template against this.
 
 ### Effort modulation
 

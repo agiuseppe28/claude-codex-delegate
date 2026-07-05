@@ -1,46 +1,40 @@
 # model-policy.toml — single source of truth for "which model, how much effort".
 #
-# Update these ids when OpenAI ships/retires a model. Adding a new model is a
-# one-line edit here; nothing else in the plugin needs to change. Copy this
-# file to `.codex-delegate.local/model-policy.toml` in your repo and edit the
-# copy — the shipped template is the fallback used when no local override
-# exists.
-
-[models.gpt-5-flagship]
+# Copy this file to `.codex-delegate.local/model-policy.toml` in your repo and
+# edit the copy — the shipped template is the fallback used when no local
+# override exists.
+#
+# Flagship-first policy: ONE model, effort is the lever (low/medium/high).
+# Update the flagship id below when OpenAI ships a newer flagship. Avoid `-pro`
+# variants (cost) and older/smaller models (no real advantage; many support only
+# `medium` effort anyway). A different model appears only as a rare fallback.
+# Future: the 5.6 "sol/terra/luna" line will need a different strategy — revisit
+# when it is public.
+[models."gpt-5.5"]
 tier = "flagship"
-
-[models.gpt-5-fast]
-tier = "fast"
-
-[models.gpt-5-general]
+[models."gpt-5.3-codex"]   # rare fallback only: used if the flagship is unavailable
 tier = "general"
 
-# Mechanical edits, apply-diff, rename: cheap and fast, preserves account limits.
-[classes.mechanical]
-model = "gpt-5-fast"
+[classes.mechanical]     # simple, mechanical edits — low effort (fast, cheap)
+model = "gpt-5.5"
 effort = "low"
-fallback = ["gpt-5-flagship", "gpt-5-general"]
+fallback = ["gpt-5.3-codex"]
 timeout = "10m"
 
-# Feature work, guided refactor, writing tests: balanced default.
-[classes.implementation]
-model = "gpt-5-flagship"
+[classes.implementation] # features / guided refactors — medium effort
+model = "gpt-5.5"
 effort = "medium"
-fallback = ["gpt-5-general", "gpt-5-fast"]
+fallback = ["gpt-5.3-codex"]
 timeout = "30m"
 
-# Tough bugs, heavy reasoning: highest effort, longest budget.
-[classes.hard]
-model = "gpt-5-flagship"
+[classes.hard]           # tough bugs / heavy reasoning — high effort
+model = "gpt-5.5"
 effort = "high"
-fallback = ["gpt-5-general"]
+fallback = ["gpt-5.3-codex"]
 timeout = "45m"
 
-# Uncertain task classification falls back to the conservative default.
 [default]
 class = "implementation"
 
-# Ladder guards live here, alongside the per-class timeouts, so all
-# consumption controls sit in one file.
 [limits]
 maxAttemptsPerTask = 4
