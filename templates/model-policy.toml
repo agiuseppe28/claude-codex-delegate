@@ -1,0 +1,46 @@
+# model-policy.toml — single source of truth for "which model, how much effort".
+#
+# Update these ids when OpenAI ships/retires a model. Adding a new model is a
+# one-line edit here; nothing else in the plugin needs to change. Copy this
+# file to `.codex-delegate.local/model-policy.toml` in your repo and edit the
+# copy — the shipped template is the fallback used when no local override
+# exists.
+
+[models.gpt-5-flagship]
+tier = "flagship"
+
+[models.gpt-5-fast]
+tier = "fast"
+
+[models.gpt-5-general]
+tier = "general"
+
+# Mechanical edits, apply-diff, rename: cheap and fast, preserves account limits.
+[classes.mechanical]
+model = "gpt-5-fast"
+effort = "low"
+fallback = ["gpt-5-flagship", "gpt-5-general"]
+timeout = "10m"
+
+# Feature work, guided refactor, writing tests: balanced default.
+[classes.implementation]
+model = "gpt-5-flagship"
+effort = "medium"
+fallback = ["gpt-5-general", "gpt-5-fast"]
+timeout = "30m"
+
+# Tough bugs, heavy reasoning: highest effort, longest budget.
+[classes.hard]
+model = "gpt-5-flagship"
+effort = "high"
+fallback = ["gpt-5-general"]
+timeout = "45m"
+
+# Uncertain task classification falls back to the conservative default.
+[default]
+class = "implementation"
+
+# Ladder guards live here, alongside the per-class timeouts, so all
+# consumption controls sit in one file.
+[limits]
+maxAttemptsPerTask = 4

@@ -1,0 +1,16 @@
+# protected-paths.toml — generic deny-list of glob patterns Codex may never
+# touch, regardless of what a delegation's whitelist says.
+#
+# These are generic, project-agnostic defaults. To add project-specific
+# patterns (e.g. a private data directory or local secrets file), do NOT edit
+# this file — create `.codex-delegate.local/protected-paths.toml` in your repo
+# with your own `globs = [...]` list; it is merged with (not a replacement
+# for) these defaults.
+
+globs = [
+  "**/*.dump",
+  "**/*.sqlite",
+  "**/.env",
+  "**/id_rsa",
+  "_worktrees/**",
+]
