@@ -27,7 +27,9 @@ export class Verifier {
   ) {}
 
   async verify(req: VerifyRequest): Promise<Verdict> {
-    const status = await this.run('git', ['status', '--porcelain'], { cwd: req.repoPath });
+    const status = await this.run('git', ['status', '--porcelain'], {
+      cwd: req.repoPath,
+    });
     const changed = parsePorcelain(status.stdout);
     const protectedTouched = changed.filter((p) => this.deny.isProtected(p));
     const stray = outsideWhitelist(changed, req.whitelist);

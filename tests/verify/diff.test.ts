@@ -14,7 +14,9 @@ describe('parsePorcelain', () => {
 
 describe('outsideWhitelist', () => {
   it('returns paths not covered by the whitelist', () => {
-    expect(outsideWhitelist(['src/a.ts', 'src/b.ts'], ['src/a.ts'])).toEqual(['src/b.ts']);
+    expect(outsideWhitelist(['src/a.ts', 'src/b.ts'], ['src/a.ts'])).toEqual([
+      'src/b.ts',
+    ]);
   });
   it('normalizes separators before comparing', () => {
     expect(outsideWhitelist(['src\\a.ts'], ['src/a.ts'])).toEqual([]);
