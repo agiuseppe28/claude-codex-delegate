@@ -9,7 +9,15 @@ export interface LedgerEntry {
   readonly at: string; // ISO timestamp, supplied by caller
 }
 
-const ALLOWED = ['taskId', 'account', 'model', 'taskClass', 'rung', 'exitCode', 'at'];
+const ALLOWED = new Set<keyof LedgerEntry>([
+  'taskId',
+  'account',
+  'model',
+  'taskClass',
+  'rung',
+  'exitCode',
+  'at',
+]);
 
 export type AppendLine = (line: string) => void;
 
@@ -18,7 +26,8 @@ export class Ledger {
 
   record(entry: LedgerEntry): void {
     for (const key of Object.keys(entry)) {
-      if (!ALLOWED.includes(key)) throw new Error(`disallowed ledger field: ${key}`);
+      if (!ALLOWED.has(key as keyof LedgerEntry))
+        throw new Error(`disallowed ledger field: ${key}`);
     }
     this.append(JSON.stringify(entry) + '\n');
   }

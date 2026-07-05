@@ -26,7 +26,7 @@ const protectedBySuffix = (suffix: string): ProtectedMatcher => ({
 
 describe('Verifier', () => {
   it('passes when only whitelisted files changed and checks succeed', async () => {
-    const runner = runnerScript({ 'status --porcelain': { stdout: ' M src/a.ts\n' } });
+    const runner = runnerScript({ 'status --porcelain': { stdout: ' M src/a.ts\0' } });
     const v = new Verifier(runner, notProtected);
     const verdict = await v.verify({
       repoPath: '/r',
@@ -39,7 +39,7 @@ describe('Verifier', () => {
 
   it('auto-reverts out-of-whitelist changes and fails the verdict', async () => {
     const runner = runnerScript({
-      'status --porcelain': { stdout: ' M src/a.ts\n M src/evil.ts\n' },
+      'status --porcelain': { stdout: ' M src/a.ts\0 M src/evil.ts\0' },
     });
     const v = new Verifier(runner, notProtected);
     const verdict = await v.verify({
@@ -58,7 +58,7 @@ describe('Verifier', () => {
   });
 
   it('fails hard when a protected path was touched', async () => {
-    const runner = runnerScript({ 'status --porcelain': { stdout: ' M data/x.dump\n' } });
+    const runner = runnerScript({ 'status --porcelain': { stdout: ' M data/x.dump\0' } });
     const v = new Verifier(runner, protectedBySuffix('.dump'));
     const verdict = await v.verify({ repoPath: '/r', whitelist: [], checks: [] });
     expect(verdict.ok).toBe(false);
@@ -67,7 +67,7 @@ describe('Verifier', () => {
 
   it('fails when a check command exits non-zero', async () => {
     const runner = runnerScript({
-      'status --porcelain': { stdout: ' M src/a.ts\n' },
+      'status --porcelain': { stdout: ' M src/a.ts\0' },
       test: { exitCode: 1 },
     });
     const v = new Verifier(runner, notProtected);
@@ -78,5 +78,51 @@ describe('Verifier', () => {
     });
     expect(verdict.ok).toBe(false);
     expect(verdict.failedChecks).toEqual(['npm test']);
+  });
+
+  it('reverts a stray with a space in its name using the raw path', async () => {
+    const runner = runnerScript({
+      'status --porcelain': { stdout: ' M src/a.ts\0?? stray file.ts\0' },
+    });
+    const v = new Verifier(runner, notProtected);
+    const verdict = await v.verify({
+      repoPath: '/r',
+      whitelist: ['src/a.ts'],
+      checks: [],
+    });
+    expect(verdict.reverted).toContain('stray file.ts');
+    expect(runner).toHaveBeenCalledWith(
+      'git',
+      ['clean', '-f', '--', 'stray file.ts'],
+      expect.anything(),
+    );
+  });
+
+  it('hard-fails a path that is both protected and out-of-whitelist, even though it is also reverted', async () => {
+    const runner = runnerScript({
+      'status --porcelain': { stdout: ' M data/x.dump\0' },
+    });
+    const v = new Verifier(runner, protectedBySuffix('.dump'));
+    const verdict = await v.verify({
+      repoPath: '/r',
+      whitelist: [],
+      checks: [],
+    });
+    expect(verdict.ok).toBe(false);
+    expect(verdict.protectedTouched).toContain('data/x.dump');
+    expect(verdict.reverted).toContain('data/x.dump');
+  });
+
+  it('invokes git clean -f -- for an untracked (??) stray', async () => {
+    const runner = runnerScript({
+      'status --porcelain': { stdout: '?? junk.ts\0' },
+    });
+    const v = new Verifier(runner, notProtected);
+    await v.verify({ repoPath: '/r', whitelist: [], checks: [] });
+    expect(runner).toHaveBeenCalledWith(
+      'git',
+      ['clean', '-f', '--', 'junk.ts'],
+      expect.anything(),
+    );
   });
 });

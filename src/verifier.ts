@@ -27,7 +27,7 @@ export class Verifier {
   ) {}
 
   async verify(req: VerifyRequest): Promise<Verdict> {
-    const status = await this.run('git', ['status', '--porcelain'], {
+    const status = await this.run('git', ['status', '--porcelain', '-z'], {
       cwd: req.repoPath,
     });
     const changed = parsePorcelain(status.stdout);
@@ -36,6 +36,10 @@ export class Verifier {
 
     const reverted: string[] = [];
     for (const path of stray) {
+      // `git checkout --` restores tracked modifications (no-op on untracked
+      // paths); `git clean -f --` removes untracked strays (no-op on tracked
+      // paths). Issuing both covers either kind of stray without needing to
+      // classify it first.
       await this.run('git', ['checkout', '--', path], { cwd: req.repoPath });
       await this.run('git', ['clean', '-f', '--', path], { cwd: req.repoPath });
       reverted.push(path);
