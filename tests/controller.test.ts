@@ -152,7 +152,7 @@ describe('Controller', () => {
       run: vi.fn(() =>
         Promise.resolve({
           exitCode: 1,
-          stderr: '429 rate limit',
+          stderr: '429 rate limit: 503 Service Unavailable',
           report: '',
           timedOut: false,
         }),
@@ -172,6 +172,14 @@ describe('Controller', () => {
     //  attempt 3 @ chainIndex 2 -> can't downgrade -> hand_back
     // => 3 executor.run calls, not 4.
     expect(executor.run).toHaveBeenCalledTimes(3);
+    // The real cause of the hand_back (Codex's stderr) must surface to the
+    // caller instead of being silently discarded.
+    expect(out.lastError).toContain('503 Service Unavailable');
+    const ledger = c.ledger as { record: ReturnType<typeof vi.fn> };
+    for (const call of ledger.record.mock.calls) {
+      expect(call[0]).not.toHaveProperty('stderr');
+      expect(JSON.stringify(call[0])).not.toContain('503');
+    }
   });
 
   it('does not reset retriedTransient after a downgrade (task-global flag)', async () => {

@@ -26,6 +26,20 @@ export interface Collaborators {
 export interface Outcome {
   readonly status: 'done' | 'hand_back';
   readonly report?: string;
+  /** Truncated tail of the most recent execution's stderr, present only on
+   * `hand_back`, so a human can see why without digging through logs. Never
+   * written to the ledger (metadata-only by construction). */
+  readonly lastError?: string;
+}
+
+// Bound how much stderr we carry across ladder iterations / surface to the
+// caller — enough to see the actual error, not enough to blow up logs.
+const LAST_ERROR_TAIL_CHARS = 800;
+
+function tailError(stderr: string): string {
+  return stderr.length > LAST_ERROR_TAIL_CHARS
+    ? stderr.slice(-LAST_ERROR_TAIL_CHARS)
+    : stderr;
 }
 
 export class Controller {
@@ -42,6 +56,7 @@ export class Controller {
 
     let chainIndex = 0;
     let retriedTransient = false;
+    let lastStderr = '';
     for (let attempt = 1; attempt <= policy.limits.maxAttemptsPerTask; attempt++) {
       const model =
         resolved.chain[chainIndex] ?? resolved.chain[resolved.chain.length - 1]!;
@@ -52,6 +67,7 @@ export class Controller {
         effort: resolved.effort,
         timeoutMs: resolved.timeoutMs,
       });
+      lastStderr = res.stderr;
 
       if (res.exitCode === 0) {
         const verdict = await this.c.verifier.verify({
@@ -99,7 +115,12 @@ export class Controller {
         at: this.c.now(),
       });
 
-      if (action.type === 'hand_back') return { status: 'hand_back', report: res.report };
+      if (action.type === 'hand_back')
+        return {
+          status: 'hand_back',
+          report: res.report,
+          lastError: tailError(lastStderr),
+        };
       await this.c.snapshot.restore(spec.repoPath); // idempotent retry
       if (action.type === 'switch_account') await this.c.multiAuth.switchToNextHealthy();
       if (action.type === 'downgrade')
@@ -109,6 +130,6 @@ export class Controller {
       // instead of retrying again.
       if (action.type === 'retry') retriedTransient = true;
     }
-    return { status: 'hand_back' };
+    return { status: 'hand_back', lastError: tailError(lastStderr) };
   }
 }

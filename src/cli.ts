@@ -245,6 +245,9 @@ export async function runDelegate(specFile: string, deps: DelegateDeps): Promise
 
   const outcome = await deps.controllerDelegate(spec, policy);
   deps.print(JSON.stringify(outcome));
+  if (outcome.status === 'hand_back' && outcome.lastError) {
+    console.error(`delegate: handed back — last error: ${outcome.lastError}`);
+  }
   return outcome.status === 'done' ? 0 : 1;
 }
 
