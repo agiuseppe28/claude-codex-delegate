@@ -103,6 +103,9 @@ export class Controller {
       if (action.type === 'switch_account') await this.c.multiAuth.switchToNextHealthy();
       if (action.type === 'downgrade')
         chainIndex = Math.min(chainIndex + 1, resolved.chain.length - 1);
+      // Task-global by design: one transient/crash retry per task (not per model),
+      // so after a downgrade a transient on the new model escalates immediately
+      // instead of retrying again.
       if (action.type === 'retry') retriedTransient = true;
     }
     return { status: 'hand_back' };

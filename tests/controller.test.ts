@@ -155,5 +155,35 @@ describe('Controller', () => {
     const c = collaborators({ executor, multiAuth });
     const out = await new Controller(c as never).delegate(spec, policy);
     expect(out.status).toBe('hand_back');
+    // Trace (chain length 3, no healthy other account, persistent rate-limit):
+    //  attempt 1 @ chainIndex 0 -> downgrade (chainIndex -> 1)
+    //  attempt 2 @ chainIndex 1 -> downgrade (chainIndex -> 2)
+    //  attempt 3 @ chainIndex 2 -> can't downgrade -> hand_back
+    // => 3 executor.run calls, not 4.
+    expect(executor.run).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not reset retriedTransient after a downgrade (task-global flag)', async () => {
+    const executor = {
+      run: vi.fn(() =>
+        Promise.resolve({
+          exitCode: 1,
+          stderr: 'network ECONNRESET',
+          report: '',
+          timedOut: false,
+        }),
+      ),
+    };
+    const c = collaborators({ executor });
+    const out = await new Controller(c as never).delegate(spec, policy);
+    expect(out.status).toBe('hand_back');
+    // Trace (chain length 3, maxAttempts 4, every attempt is transient/crash):
+    //  attempt 1 @ chainIndex 0, retriedTransient=false -> retry (flag set true)
+    //  attempt 2 @ chainIndex 0, retriedTransient=true  -> flag already spent,
+    //    so this escalates to downgrade instead of a second retry (chainIndex -> 1)
+    //  attempt 3 @ chainIndex 1, retriedTransient=true  -> downgrade (chainIndex -> 2)
+    //  attempt 4: attempt >= maxAttempts(4) -> hand_back before another run
+    // => 4 executor.run calls total, with only ONE retry ever granted.
+    expect(executor.run).toHaveBeenCalledTimes(4);
   });
 });
