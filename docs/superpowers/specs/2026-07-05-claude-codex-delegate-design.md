@@ -3,6 +3,8 @@
 **Date:** 2026-07-05
 **Status:** Approved design, pre-implementation
 **Type:** Claude Code plugin (ships a skill + slash command + wrapper + config templates)
+**Stack:** Node.js ≥18.18 / TypeScript (strict). Cross-platform by construction;
+tested Windows-first. Hygiene: `tsc` strict + eslint + prettier + vitest.
 
 ## Purpose
 
@@ -63,7 +65,7 @@ away. The plugin remains excellent for ad-hoc review, reused in phase 2.
 | `SKILL.md` | Narrative telling Claude how to sequence the work: classify task → write delegation spec → invoke wrapper → verify | instructions |
 | Policy resolver | `task class → (model, effort, fallback chain)`; pure lookup | reads `model-policy.toml` |
 | Prompt builder | `delegation spec → final Codex prompt` with hygiene contract injected; pure transform | function in wrapper |
-| Executor / wrapper | Runs `codex exec` with pinned sandbox + whitelist; captures structured output. Side effects isolated here | PowerShell script (Windows-first) |
+| Executor / wrapper | Runs `codex exec` with pinned sandbox + whitelist; captures structured output. Side effects isolated here | TypeScript module (`child_process` → `codex exec`) |
 | Switch / fallback controller | Decides next action on failure: retry → switch account → downgrade → hand back to Claude | logic in wrapper |
 | Verifier | Runs project checks + `git status`; returns pass/fail | invokes existing/ pluggable checks |
 
@@ -266,7 +268,8 @@ Code Desktop and CLI; installable via marketplace/git. Contains:
   about to delegate;
 - an ergonomic **slash command** (e.g. `/codex-delegate`) as an explicit entry
   point — convenient in Desktop;
-- the **wrapper script** (PowerShell) + **config templates** (`model-policy.toml`,
+- the **core logic** (TypeScript: policy resolver, prompt builder, executor,
+  fallback controller, verifier) + **config templates** (`model-policy.toml`,
   generic protected-path deny-list, verify hooks);
 - a **`doctor`/setup command** checking dependencies (codex? codex-multi-auth?
   accounts logged in? policy present?) and guiding installation on gaps — this
@@ -292,14 +295,71 @@ hard-codes project paths or a project-specific deny-list. Project specifics live
 in local config (in the user's workspace, not the public repo); the public repo
 ships only generic defaults + docs.
 
-**MVP scoping:** Windows/PowerShell first (the author's environment, actually
-testable); bash parity (Mac/Linux) is a later phase. No day-1 promise of full
-cross-platform.
+**MVP scoping:** the TypeScript core is cross-platform by construction (Node
+`child_process`), so there is no separate "bash port" workstream. It is
+developed and tested Windows-first (the author's environment); macOS/Linux
+correctness is verified in CI before being claimed, not assumed.
 
 **README honesty:** document that multi-account rotation is for accounts the user
 owns, is a gray area of OpenAI's ToS, and must be used responsibly.
 
 **License:** MIT.
+
+## Project governance & OSS hygiene
+
+The repository must be its own first example of the discipline it enforces. We
+adapt the author's workspace-governance model (not copy it wholesale — that
+model targets a complex multi-repo workspace; YAGNI applies to a single public
+plugin).
+
+### Code hygiene (TypeScript translation of the CS314 guide)
+
+`CODE_HYGIENE.md` adapts the CS314 Code Hygiene Guide to TypeScript/Node:
+
+- Code is read more than written; small units expose bugs earlier.
+- Names explain intent without restating types; explicit typed interfaces at
+  boundaries; no hidden mutable state.
+- Files over 500 lines need a reason; over 900 need a split plan (generated/
+  data-only excluded).
+- Pure functions where practical (policy resolver, prompt builder are pure and
+  independently testable); side effects isolated to the executor.
+- Comments describe behavior, constraints, invariants — not the obvious.
+- One canonical doc per topic; superseded material is archived, not left in the
+  active path.
+
+### Enforcement stack
+
+- **TypeScript strict** (`tsconfig` with `strict: true`, `noUncheckedIndexedAccess`).
+- **eslint** (typescript-eslint) + **prettier** — formatting and lint clean is a
+  merge gate.
+- **vitest** — unit tests for the pure units (resolver, prompt builder, fallback
+  decision logic) and integration tests for the executor with `codex` mocked.
+- **CI** (GitHub Actions): lint + typecheck + test on push/PR; runs on Windows
+  and Linux runners to back the cross-platform claim.
+- **`.editorconfig`**, conventional commit style, `CHANGELOG.md`.
+- **Secret hygiene:** a gitleaks (or equivalent) scan in CI; no secrets, tokens,
+  or account identifiers ever committed (mirrors the runtime secret guard).
+
+### Governance docs (adapted, minimal)
+
+- `BACKLOG.md` — single live work queue; each item has status, task, exit
+  criteria (as in the author's workspaces).
+- `CODE_HYGIENE.md` — as above.
+- `CONTRIBUTING.md` — how to propose model-policy updates, add task classes,
+  extend the deny-list; the delegation-contract philosophy; test/lint gates.
+- Not adopted (YAGNI for a single repo): the multi-repo `PROJECT.md` /
+  `WORKSPACE_STATE.md` / `OPERATIONS.md` / audit-script apparatus. Their intent
+  is folded into `README.md` + `BACKLOG.md` + CI.
+
+### Open-source essentials
+
+- `LICENSE` — **MIT**.
+- `README.md` — what it is, install (`doctor`/setup), quickstart, the honest ToS
+  note on multi-account rotation (accounts you own; gray area; use responsibly).
+- `CODE_OF_CONDUCT.md` — Contributor Covenant.
+- `CONTRIBUTING.md` — see above.
+- `SECURITY.md` — how to report vulnerabilities; reaffirms no-secrets policy.
+- Issue/PR templates; `.github/` with the CI workflow.
 
 ## Open questions for implementation
 
