@@ -31,6 +31,7 @@ Policy resolver ──► (model, effort, fallback chain) from model-policy.toml
 Prompt builder ──► Codex prompt = spec + injected hygiene contract
   ▼
 Executor/wrapper ──► `codex exec` inside the target repo's working dir
+  │                   prompt delivered via stdin (never a CLI argument)
   │                   sandbox=workspace-write, network OFF, never full-access
   │                   ┌─ error / rate-limit? ──► Fallback controller
   │                   │      retry → switch account → downgrade → hand back

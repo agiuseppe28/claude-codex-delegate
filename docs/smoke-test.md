@@ -51,6 +51,27 @@ green:
 This closes the end-to-end validation: real `codex exec` on the flagship at
 low effort, whitelist-verified, metadata-only ledger, no false-done.
 
+## Bug found via real use: Windows multiline-prompt truncation (arg → stdin)
+
+A later real end-to-end run with a genuinely **multiline** `instructions`
+field (the smoke above only used a short single-line instruction) surfaced a
+second, more serious bug: the prompt was passed as a `codex exec` CLI
+**argument**. On Windows, `cross-spawn` runs the npm `.cmd` shim for `codex`
+via `cmd.exe`, which truncates a multiline argument at the first newline —
+`codex exec` received only the first line of the prompt and lost every flag
+that followed the prompt in the args array (including
+`--output-last-message`). The result was an empty last-message and zero file
+changes with exit code 0 — i.e. a silent no-op that looked like a clean
+success. Single-line prompts (like the one used in the run above) worked;
+real multiline prompts did not.
+
+Fix: the prompt is now delivered via stdin (`codex exec` reads instructions
+from stdin when the positional argument is `-`), and a zero-file-change clean
+exit is no longer treated as `done` — see `src/exec/run.ts`,
+`src/exec/codexArgs.ts`, `src/executor.ts`, and the zero-change guard in
+`src/controller.ts`. Re-run with a real multiline prompt confirmed the full
+instructions reached Codex and both requested edits landed.
+
 ## Note: a transient runtime 503 seen while debugging
 
 Before the successful run, a green `done` was temporarily blocked by a

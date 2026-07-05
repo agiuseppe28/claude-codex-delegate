@@ -129,6 +129,12 @@ and never suggest editing those files to "unblock" a delegation — if Codex
 needs more access than the contract allows, the task is not a good candidate
 for delegation.
 
+The `instructions` text is delivered to Codex via stdin (`codex exec -`), not
+as a CLI argument — this keeps multiline prompts intact across platforms and
+means the prompt never touches argv or a shell. You don't need to do anything
+differently because of this; it only matters if you're reading the executor
+code.
+
 ## When NOT to delegate
 
 - The task requires interactive judgment, back-and-forth exploration, or

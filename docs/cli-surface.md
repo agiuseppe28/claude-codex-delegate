@@ -9,8 +9,7 @@ as verified against a live install, so that `buildCodexArgs` and the
 Verified version: `codex-cli 0.142.5`.
 
 `buildCodexArgs` (`src/exec/codexArgs.ts`) builds the argument array for
-`codex exec` and required **no changes** — it was already correct against the
-real CLI. Confirmed flags in use:
+`codex exec`. Confirmed flags in use:
 
 - `-c key=value` — dotted-path TOML value override (repeatable).
 - `-m`, `--model` — model selection.
@@ -21,6 +20,27 @@ real CLI. Confirmed flags in use:
 - `-o`, `--output-last-message <FILE>` — write the last agent message to a file.
 
 The forbidden flag `--dangerously-bypass-approvals-and-sandbox` is never used.
+
+### The prompt is delivered via stdin, never as an argument
+
+The trailing positional in the args array is the literal sentinel `-`, not
+the prompt text. Per `codex exec --help`, "If not provided as an argument (or
+if `-` is used), instructions are read from stdin." The runner
+(`src/exec/run.ts`) writes the prompt to the child's stdin and closes it
+(`child.stdin.write(prompt); child.stdin.end();`) immediately after spawn.
+
+This is load-bearing, not cosmetic: on Windows, `cross-spawn` runs the npm
+`.cmd` shim for `codex` via `cmd.exe`, which truncates a multiline CLI
+_argument_ at the first newline — silently dropping the rest of the prompt
+and every flag that followed it in the array. A real multiline prompt passed
+as an argument reduced to just its first line, and Codex ran with no real
+instructions (see `docs/smoke-test.md`). stdin is a raw byte stream that
+`cmd.exe` never re-parses, so newlines survive intact regardless of platform
+or shim.
+
+This also strengthens the injection story: the prompt never touches argv or
+any shell — it cannot be reflected into shell metacharacter handling, process
+listings (`ps`/Task Manager command-line columns), or shim re-parsing at all.
 
 ## codex-multi-auth
 
