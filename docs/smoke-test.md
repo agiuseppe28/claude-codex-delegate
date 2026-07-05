@@ -34,18 +34,31 @@ Against real Codex 0.142.5 on Windows:
 - No false-done: on failure, `README.md` was left untouched (the snapshot/
   restore + whitelist-enforcement guard worked as designed).
 
-## Known caveat at time of writing
+## Successful end-to-end run
 
-A green `done` outcome with a real file edit was blocked by a transient
+After a clean restart of the multi-auth runtime, the full path completed
+green:
+
+- Outcome: `{"status":"done"}`, exit code 0.
+- `README.md` gained exactly a trailing `## Notes` heading; `git diff` showed
+  `1 file changed, 2 insertions(+)` and nothing else was touched.
+- Ledger: a single metadata-only entry —
+  `{"taskId":"CCD-SMOKE-1","account":"account-0","model":"gpt-5.5","taskClass":"mechanical","rung":"execute","exitCode":0,"at":"..."}`
+  (real account label, no prompt/diff/secret content).
+- The plugin does not auto-commit or push: the edit is left in the working
+  tree for review.
+
+This closes the end-to-end validation: real `codex exec` on the flagship at
+low effort, whitelist-verified, metadata-only ledger, no false-done.
+
+## Note: a transient runtime 503 seen while debugging
+
+Before the successful run, a green `done` was temporarily blocked by a
 multi-auth runtime `/responses` 503 ("All managed Codex accounts temporarily
-unavailable"). This 503 was itself caused, during debugging, by killing the
-multi-auth worker processes out from under the runtime.
-
-Recovery: restart the Codex app / multi-auth runtime (or reboot), then re-run
-`node dist/cli.js delegate <spec>`.
-
-This is an environment/runtime state issue observed while debugging, not a
-defect in the plugin — the controller correctly classified the 503, ran the
-fallback ladder, and handed back cleanly instead of reporting false success
-(see `Outcome.lastError`, which now surfaces the real Codex stderr on
-hand_back instead of discarding it).
+unavailable"), caused during debugging by killing the multi-auth worker
+processes out from under the runtime. Recovery was a restart of the multi-auth
+runtime (reboot). This was an environment/runtime state issue, not a plugin
+defect — the controller correctly classified the 503, ran the fallback ladder,
+and handed back cleanly instead of reporting false success (see
+`Outcome.lastError`, which surfaces the real Codex stderr on hand_back instead
+of discarding it).
