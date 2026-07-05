@@ -99,7 +99,8 @@ deliverable), so tasks give exact file contents rather than TDD cycles; the
     "vitest": "^1.6.0"
   },
   "dependencies": {
-    "smol-toml": "^1.2.0"
+    "smol-toml": "^1.2.0",
+    "minimatch": "^9.0.0"
   }
 }
 ```
@@ -549,6 +550,11 @@ describe('loadModelPolicy', () => {
     const bad = toml.replace('class = "implementation"', 'class = "nope"');
     expect(() => loadModelPolicy(bad)).toThrow(/default class "nope"/);
   });
+
+  it('rejects a policy missing the [limits] section', () => {
+    const bad = toml.replace(/\[limits\][\s\S]*$/, '');
+    expect(() => loadModelPolicy(bad)).toThrow(/maxAttemptsPerTask/);
+  });
 });
 
 describe('resolve', () => {
@@ -581,9 +587,15 @@ import { parseDurationMs } from './duration.js';
 import type { ModelPolicy, ResolvedModel } from './types.js';
 
 export function loadModelPolicy(toml: string): ModelPolicy {
-  const raw = parse(toml) as unknown as ModelPolicy;
-  const modelIds = new Set(Object.keys(raw.models ?? {}));
-  for (const [name, cfg] of Object.entries(raw.classes ?? {})) {
+  const raw = parse(toml) as unknown as Partial<ModelPolicy>;
+  if (!raw.models) throw new Error('policy missing [models] section');
+  if (!raw.classes) throw new Error('policy missing [classes] section');
+  if (!raw.default?.class) throw new Error('policy missing [default] class');
+  if (typeof raw.limits?.maxAttemptsPerTask !== 'number') {
+    throw new Error('policy missing [limits] maxAttemptsPerTask');
+  }
+  const modelIds = new Set(Object.keys(raw.models));
+  for (const [name, cfg] of Object.entries(raw.classes)) {
     for (const id of [cfg.model, ...cfg.fallback]) {
       if (!modelIds.has(id)) {
         throw new Error(`class "${name}" references unknown model "${id}"`);
@@ -593,7 +605,7 @@ export function loadModelPolicy(toml: string): ModelPolicy {
   if (!raw.classes[raw.default.class]) {
     throw new Error(`default class "${raw.default.class}" is not defined`);
   }
-  return raw;
+  return raw as ModelPolicy;
 }
 
 export function resolve(policy: ModelPolicy, taskClass: string): ResolvedModel {
@@ -629,10 +641,11 @@ import { describe, it, expect } from 'vitest';
 import { compileDenyList, isProtected } from '../../src/config/protectedPaths.js';
 
 describe('protected paths', () => {
-  const deny = compileDenyList(['*.dump', '_worktrees/**', 'secrets.toml']);
+  const deny = compileDenyList(['**/*.dump', '_worktrees/**', 'secrets.toml']);
 
   it('matches an exact file', () => expect(isProtected(deny, 'secrets.toml')).toBe(true));
-  it('matches a glob extension', () => expect(isProtected(deny, 'db/registry.dump')).toBe(true));
+  it('matches a nested dump', () => expect(isProtected(deny, 'db/registry.dump')).toBe(true));
+  it('matches a top-level dump', () => expect(isProtected(deny, 'registry.dump')).toBe(true));
   it('matches a directory tree', () => expect(isProtected(deny, '_worktrees/x/a.ts')).toBe(true));
   it('allows an unrelated file', () => expect(isProtected(deny, 'src/index.ts')).toBe(false));
   it('normalizes backslashes (windows)', () =>
@@ -642,31 +655,24 @@ describe('protected paths', () => {
 
 - [ ] **Step 2: Run to verify it fails** → `npm test -- protectedPaths` → FAIL.
 
-- [ ] **Step 3: Implement** (tiny glob→RegExp, dependency-light; the reviewer may
-  prefer the `minimatch` package — acceptable, but default to no extra dep)
+- [ ] **Step 3: Implement** with `minimatch` (correctly handles `**`, top-level, and
+  dotfiles — a hand-rolled glob-to-RegExp fails the nested/top-level `**/*.dump` cases)
 
 ```ts
 // src/config/protectedPaths.ts
-export interface DenyList {
-  readonly patterns: readonly RegExp[];
-}
+import { minimatch } from 'minimatch';
 
-function globToRegExp(glob: string): RegExp {
-  const escaped = glob
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\*\*/g, ' ') // placeholder for globstar
-    .replace(/\*/g, '[^/]*')
-    .replace(/ /g, '.*');
-  return new RegExp(`^${escaped}$`);
+export interface DenyList {
+  readonly globs: readonly string[];
 }
 
 export function compileDenyList(globs: readonly string[]): DenyList {
-  return { patterns: globs.map(globToRegExp) };
+  return { globs: [...globs] };
 }
 
 export function isProtected(deny: DenyList, path: string): boolean {
   const normalized = path.replace(/\\/g, '/');
-  return deny.patterns.some((re) => re.test(normalized));
+  return deny.globs.some((glob) => minimatch(normalized, glob, { dot: true }));
 }
 ```
 
@@ -923,8 +929,10 @@ describe('nextAction', () => {
     expect(act({}, 'model_unavailable')).toBe('downgrade'));
   it('hands back when the attempt budget is exhausted', () =>
     expect(act({ attempt: 4 }, 'rate_limit')).toBe('hand_back'));
-  it('hands back on repeated crash', () =>
-    expect(act({ retriedTransient: true }, 'crash')).toBe('hand_back'));
+  it('downgrades on repeated crash while a fallback model remains', () =>
+    expect(act({ retriedTransient: true }, 'crash')).toBe('downgrade'));
+  it('hands back on repeated crash once the model chain is exhausted', () =>
+    expect(act({ retriedTransient: true, chainIndex: 2 }, 'crash')).toBe('hand_back'));
 });
 ```
 
@@ -1177,7 +1185,11 @@ export class MultiAuth {
 
   async status(): Promise<Status> {
     const out = await this.run(BIN, ['status', '--json']);
-    return JSON.parse(out.stdout) as Status;
+    try {
+      return JSON.parse(out.stdout) as Status;
+    } catch {
+      return { accounts: [] }; // unparseable output → treat as no healthy accounts
+    }
   }
 
   async hasOtherHealthy(): Promise<boolean> {
@@ -1358,6 +1370,7 @@ describe('Executor', () => {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readFileSync, rmSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import type { Runner } from './exec/run.js';
 import { buildCodexArgs } from './exec/codexArgs.js';
 import type { Effort } from './config/types.js';
@@ -1394,7 +1407,7 @@ export class Executor {
   ) {}
 
   async run(req: ExecRequest): Promise<ExecResult> {
-    const outputFile = join(tmpdir(), `ccd-${req.model}-${req.timeoutMs}.txt`);
+    const outputFile = join(tmpdir(), `ccd-${randomUUID()}.txt`);
     const args = buildCodexArgs({
       prompt: req.prompt,
       repoPath: req.repoPath,
@@ -1811,6 +1824,20 @@ describe('Controller', () => {
     expect(c.snapshot.restore).toHaveBeenCalled();
   });
 
+  it('re-enters the ladder when the run is clean but verification fails', async () => {
+    const verifier = {
+      verify: vi
+        .fn()
+        .mockResolvedValueOnce({ ok: false, changed: [], reverted: ['stray.ts'], protectedTouched: [], failedChecks: [] })
+        .mockResolvedValueOnce({ ok: true, changed: [], reverted: [], protectedTouched: [], failedChecks: [] }),
+    };
+    const executor = { run: vi.fn(async () => ({ exitCode: 0, stderr: '', report: 'ok', timedOut: false })) };
+    const c = collaborators({ verifier, executor });
+    const out = await new Controller(c as never).delegate(spec, policy);
+    expect(executor.run).toHaveBeenCalledTimes(2); // failed verify → retry → success
+    expect(out.status).toBe('done');
+  });
+
   it('hands back to Claude when the attempt budget is exhausted', async () => {
     const executor = { run: vi.fn(async () => ({ exitCode: 1, stderr: '429 rate limit', report: '', timedOut: false })) };
     const multiAuth = { hasOtherHealthy: vi.fn(async () => false), switchToNextHealthy: vi.fn() };
@@ -1832,12 +1859,17 @@ import { resolve } from './config/modelPolicy.js';
 import { buildPrompt } from './promptBuilder.js';
 import { classifyFailure } from './classifyFailure.js';
 import { nextAction, type LadderState } from './fallback.js';
+import type { ExecRequest, ExecResult } from './executor.js';
+import type { VerifyRequest, Verdict } from './verifier.js';
+import type { LedgerEntry } from './ledger.js';
 
+// Collaborators are typed against the REAL exported interfaces so the compiler
+// catches any future signature drift (plan hygiene rule: typed boundaries).
 export interface Collaborators {
-  executor: { run(req: { prompt: string; repoPath: string; model: string; effort: string; timeoutMs: number }): Promise<{ exitCode: number | null; stderr: string; report: string; timedOut: boolean }> };
+  executor: { run(req: ExecRequest): Promise<ExecResult> };
   multiAuth: { hasOtherHealthy(): Promise<boolean>; switchToNextHealthy(): Promise<void> };
-  verifier: { verify(req: { repoPath: string; whitelist: readonly string[]; checks: [] }): Promise<{ ok: boolean }> };
-  ledger: { record(e: Record<string, unknown>): void };
+  verifier: { verify(req: VerifyRequest): Promise<Verdict> };
+  ledger: { record(e: LedgerEntry): void };
   snapshot: { take(repo: string): Promise<void>; restore(repo: string): Promise<void> };
   now: () => string;
 }
@@ -1850,7 +1882,11 @@ export interface Outcome {
 export class Controller {
   constructor(private readonly c: Collaborators) {}
 
-  async delegate(spec: DelegationSpec, policy: ModelPolicy): Promise<Outcome> {
+  async delegate(
+    spec: DelegationSpec,
+    policy: ModelPolicy,
+    checks: VerifyRequest['checks'] = [],
+  ): Promise<Outcome> {
     const resolved = resolve(policy, spec.taskClass);
     const prompt = buildPrompt(spec);
     await this.c.snapshot.take(spec.repoPath);
@@ -1864,7 +1900,7 @@ export class Controller {
       });
 
       if (res.exitCode === 0) {
-        const verdict = await this.c.verifier.verify({ repoPath: spec.repoPath, whitelist: spec.whitelist, checks: [] });
+        const verdict = await this.c.verifier.verify({ repoPath: spec.repoPath, whitelist: spec.whitelist, checks });
         this.c.ledger.record({ taskId: spec.taskId, account: 'active', model, taskClass: spec.taskClass, rung: 'execute', exitCode: 0, at: this.c.now() });
         if (verdict.ok) return { status: 'done', report: res.report };
         // verification failed → treat as crash-class and continue the ladder
@@ -1917,12 +1953,17 @@ import { describe, it, expect, vi } from 'vitest';
 import { GitSnapshot } from '../src/snapshot.js';
 
 describe('GitSnapshot', () => {
-  it('restore resets tracked + cleans untracked to the snapshot', async () => {
-    const runner = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '', timedOut: false }));
+  it('captures HEAD on take and hard-resets to that sha on restore', async () => {
+    const runner = vi.fn(async (_f: string, args: readonly string[]) => ({
+      exitCode: 0,
+      stdout: args.includes('rev-parse') ? 'abc123\n' : '',
+      stderr: '',
+      timedOut: false,
+    }));
     const snap = new GitSnapshot(runner);
     await snap.take('/r');
     await snap.restore('/r');
-    expect(runner).toHaveBeenCalledWith('git', ['reset', '--hard'], expect.objectContaining({ cwd: '/r' }));
+    expect(runner).toHaveBeenCalledWith('git', ['reset', '--hard', 'abc123'], expect.objectContaining({ cwd: '/r' }));
     expect(runner).toHaveBeenCalledWith('git', ['clean', '-fd'], expect.objectContaining({ cwd: '/r' }));
   });
 });
@@ -1937,15 +1978,20 @@ describe('GitSnapshot', () => {
 import type { Runner } from './exec/run.js';
 
 export class GitSnapshot {
+  private readonly heads = new Map<string, string>();
   constructor(private readonly run: Runner) {}
 
   async take(repoPath: string): Promise<void> {
-    // Pre-flight already guaranteed a clean tree, so the snapshot is HEAD.
-    await this.run('git', ['rev-parse', 'HEAD'], { cwd: repoPath });
+    // Pre-flight guaranteed a clean tree, so HEAD IS the snapshot. Capture the
+    // exact sha so restore is robust even if HEAD moves during the task.
+    const out = await this.run('git', ['rev-parse', 'HEAD'], { cwd: repoPath });
+    this.heads.set(repoPath, out.stdout.trim());
   }
 
   async restore(repoPath: string): Promise<void> {
-    await this.run('git', ['reset', '--hard'], { cwd: repoPath });
+    const sha = this.heads.get(repoPath);
+    const resetArgs = sha ? ['reset', '--hard', sha] : ['reset', '--hard'];
+    await this.run('git', resetArgs, { cwd: repoPath });
     await this.run('git', ['clean', '-fd'], { cwd: repoPath });
   }
 }
@@ -2002,22 +2048,24 @@ git add docs/cli-surface.md src/exec/codexArgs.ts src/multiAuth.ts
 git commit -m "chore: pin verified codex + codex-multi-auth CLI surface"
 ```
 
-### Task 8.2: Preflight gate (PURE + thin IO)
+### Task 8.2: Preflight gate + spec validation (PURE)
 
 **Files:**
 - Create: `src/preflight.ts`
 - Test: `tests/preflight.test.ts`
 
-Guards before any execution: (a) target is a git repo; (b) tree is clean of
-unrelated changes; (c) no whitelist entry is a protected path. Returns a
-`PreflightResult` the CLI turns into abort / ask-user / proceed.
+`evaluatePreflight` guards before any execution: (a) target is a git repo;
+(b) tree is clean of unrelated changes; (c) no whitelist entry is a protected
+path. Returns a `PreflightResult` the CLI turns into abort / ask-user / proceed.
+`validateDelegationSpec` shape-checks the spec Claude wrote (absolute repoPath,
+non-empty whitelist, required fields) before preflight runs.
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
 // tests/preflight.test.ts
 import { describe, it, expect } from 'vitest';
-import { evaluatePreflight } from '../src/preflight.js';
+import { evaluatePreflight, validateDelegationSpec } from '../src/preflight.js';
 
 describe('evaluatePreflight', () => {
   it('aborts when a whitelist entry is protected', () => {
@@ -2037,6 +2085,20 @@ describe('evaluatePreflight', () => {
     expect(r.decision).toBe('proceed');
   });
 });
+
+describe('validateDelegationSpec', () => {
+  const good = {
+    taskId: 'CCD-1', repoPath: '/abs/repo', branch: 'b', taskClass: 'mechanical',
+    instructions: 'do', whitelist: ['a.ts'], completionCriterion: 'green',
+  };
+  it('accepts a well-formed spec', () => expect(() => validateDelegationSpec(good)).not.toThrow());
+  it('rejects an empty whitelist (primary guard)', () =>
+    expect(() => validateDelegationSpec({ ...good, whitelist: [] })).toThrow(/whitelist/));
+  it('rejects a relative repoPath', () =>
+    expect(() => validateDelegationSpec({ ...good, repoPath: 'repo' })).toThrow(/absolute/));
+  it('rejects a missing completion criterion', () =>
+    expect(() => validateDelegationSpec({ ...good, completionCriterion: '' })).toThrow(/completionCriterion/));
+});
 ```
 
 - [ ] **Step 2: Run to verify it fails** → FAIL.
@@ -2045,6 +2107,9 @@ describe('evaluatePreflight', () => {
 
 ```ts
 // src/preflight.ts
+import { isAbsolute } from 'node:path';
+import type { DelegationSpec } from './config/types.js';
+
 export interface PreflightInput {
   readonly isGitRepo: boolean;
   readonly dirtyPaths: readonly string[];
@@ -2065,6 +2130,22 @@ export function evaluatePreflight(input: PreflightInput): PreflightResult {
   if (input.dirtyPaths.length > 0)
     return { decision: 'ask', reason: `uncommitted changes present: ${input.dirtyPaths.join(', ')}` };
   return { decision: 'proceed', reason: 'clean' };
+}
+
+/**
+ * Shape-validate a spec Claude wrote before it reaches preflight. An empty
+ * whitelist is the primary Windows guard, so its absence is a hard error.
+ */
+export function validateDelegationSpec(
+  spec: Partial<DelegationSpec>,
+): asserts spec is DelegationSpec {
+  if (!spec.repoPath || !isAbsolute(spec.repoPath))
+    throw new Error('spec.repoPath must be an absolute path');
+  if (!spec.whitelist || spec.whitelist.length === 0)
+    throw new Error('spec.whitelist must be non-empty');
+  for (const field of ['taskId', 'branch', 'taskClass', 'instructions', 'completionCriterion'] as const) {
+    if (!spec[field]) throw new Error(`spec.${field} is required`);
+  }
 }
 ```
 
@@ -2093,17 +2174,30 @@ import { describe, it, expect, vi } from 'vitest';
 import { runDoctor } from '../src/doctor.js';
 
 describe('runDoctor', () => {
+  const deps = (over = {}) => ({
+    which: () => true,
+    policyExists: () => true,
+    hasLoggedInAccount: async () => true,
+    ...over,
+  });
+
   it('flags a missing codex binary with a remediation command', async () => {
-    const which = vi.fn((bin: string) => bin !== 'codex'); // codex missing
-    const report = await runDoctor({ which, policyExists: () => true });
+    const report = await runDoctor(deps({ which: (bin: string) => bin !== 'codex' }));
     const codexRow = report.rows.find((r) => r.check === 'codex CLI');
     expect(codexRow?.status).toBe('missing');
     expect(codexRow?.remediation).toContain('npm i -g');
     expect(report.ok).toBe(false);
   });
 
-  it('is green when all deps present and policy exists', async () => {
-    const report = await runDoctor({ which: () => true, policyExists: () => true });
+  it('flags a logged-out account as misconfigured', async () => {
+    const report = await runDoctor(deps({ hasLoggedInAccount: async () => false }));
+    const acct = report.rows.find((r) => r.check === 'account logged in');
+    expect(acct?.status).toBe('misconfigured');
+    expect(report.ok).toBe(false);
+  });
+
+  it('is green when all deps present, policy exists, and an account is logged in', async () => {
+    const report = await runDoctor(deps());
     expect(report.ok).toBe(true);
   });
 });
@@ -2118,6 +2212,7 @@ describe('runDoctor', () => {
 export interface DoctorDeps {
   which: (bin: string) => boolean;
   policyExists: () => boolean;
+  hasLoggedInAccount: () => Promise<boolean>; // queries codex-multi-auth status
 }
 
 export interface DoctorRow {
@@ -2131,13 +2226,22 @@ export interface DoctorReport {
   readonly rows: readonly DoctorRow[];
 }
 
-export function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
+export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   const rows: DoctorRow[] = [
     row('codex CLI', deps.which('codex'), 'npm i -g @openai/codex'),
     row('codex-multi-auth', deps.which('codex-multi-auth'), 'npm i -g codex-multi-auth'),
     row('model-policy.toml', deps.policyExists(), 'copy templates/model-policy.toml into .codex-delegate.local/'),
   ];
-  return Promise.resolve({ ok: rows.every((r) => r.status === 'ok'), rows });
+  // Account login is only meaningful once the multi-auth binary exists.
+  if (deps.which('codex-multi-auth')) {
+    const loggedIn = await deps.hasLoggedInAccount();
+    rows.push(
+      loggedIn
+        ? { check: 'account logged in', status: 'ok', remediation: '' }
+        : { check: 'account logged in', status: 'misconfigured', remediation: 'run: codex-multi-auth login' },
+    );
+  }
+  return { ok: rows.every((r) => r.status === 'ok'), rows };
 }
 
 function row(check: string, present: boolean, remediation: string): DoctorRow {
@@ -2161,17 +2265,30 @@ git commit -m "feat: doctor dependency check with remediation table"
 - Create: `src/cli.ts`
 - Test: `tests/cli.test.ts` (dispatch-only: assert the right handler is called)
 
-- [ ] **Step 1: Write a dispatch test** asserting `cli(['doctor'])` calls the doctor
-  handler and `cli(['delegate', 'spec.json'])` calls the delegate handler, with a
-  non-zero exit when doctor is red. (Handlers injected for testability.)
+- [ ] **Step 1: Write dispatch + enforcement tests** (handlers/collaborators
+  injected for testability), asserting:
+  - `cli(['doctor'])` calls the doctor handler; exits non-zero when doctor is red;
+  - `cli(['delegate', 'spec.json'])` with a valid spec + `proceed` preflight calls
+    `Controller.delegate`;
+  - a preflight `abort` exits non-zero and **does NOT** call `Controller.delegate`;
+  - a preflight `ask` (dirty tree) in non-interactive mode exits non-zero and does
+    NOT call `Controller.delegate` (never silently proceeds on a dirty tree —
+    spec Hard Guard #2);
+  - an invalid spec (empty whitelist) exits non-zero before preflight.
 
 - [ ] **Step 2: Run to verify it fails** → FAIL.
 
 - [ ] **Step 3: Implement** `src/cli.ts` — a thin arg dispatcher over subcommands
-  `doctor`, `delegate <specfile>`, `refresh-models`. It wires the default runner,
-  loads the resolved policy, builds real collaborators (Executor, MultiAuth,
-  Verifier, GitSnapshot, Ledger writing to `.codex-delegate.local/ledger.jsonl`),
-  runs preflight, then `Controller.delegate`. Prints the outcome as JSON on stdout.
+  `doctor`, `delegate <specfile>`, `refresh-models`. For `delegate` it, in order:
+  1. reads + JSON-parses the spec file and runs `validateDelegationSpec` (invalid
+     → print error, exit non-zero);
+  2. wires the default runner and builds real collaborators (Executor, MultiAuth,
+     Verifier, GitSnapshot, Ledger writing to `.codex-delegate.local/ledger.jsonl`),
+     loads the resolved policy;
+  3. runs `evaluatePreflight`; **enforces the decision**: `abort` → print reason,
+     exit non-zero, no delegation; `ask` → in the default non-interactive run,
+     refuse and exit non-zero (a future interactive flag may prompt); `proceed`
+     → call `Controller.delegate` and print the outcome JSON on stdout.
   `refresh-models` queries `/v1/models` if `OPENAI_API_KEY` is set and prints a
   proposed diff (never writes the policy file).
 
@@ -2194,9 +2311,23 @@ git commit -m "feat: CLI entry (doctor | delegate | refresh-models)"
   body that instructs Claude to, in order:
   1. run `codex-delegate doctor`; if red, stop and report remediation;
   2. **classify** the task into a policy class (`mechanical`/`implementation`/`hard`);
-  3. write a `DelegationSpec` JSON — task id, absolute repo path, branch, the
-     **explicit file whitelist**, verbatim files if any, and a **verifiable
-     completion criterion**;
+  3. write a `DelegationSpec` JSON with EVERY required field (the CLI rejects a
+     spec missing any of them): `taskId`, absolute `repoPath`, `branch`,
+     `taskClass` (the class chosen in step 2), `instructions` (what Codex must
+     do), the **explicit `whitelist`** (repo-relative paths Codex may touch —
+     must be non-empty), a **verifiable `completionCriterion`**, and optional
+     `verbatimFiles` (path → exact content). Show this filled example in the skill:
+     ```json
+     {
+       "taskId": "CCD-42",
+       "repoPath": "C:/abs/path/to/repo",
+       "branch": "feat/rename-foo",
+       "taskClass": "mechanical",
+       "instructions": "Rename the symbol foo to bar in the two listed files.",
+       "whitelist": ["src/a.ts", "src/b.ts"],
+       "completionCriterion": "npm test passes and grep finds no \"foo\"."
+     }
+     ```
   4. run `codex-delegate delegate <spec.json>`;
   5. read the JSON outcome: on `done`, report the Codex diff-stat and run project
      verification; on `hand_back`, either execute the task itself or stop with the

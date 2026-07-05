@@ -175,7 +175,7 @@ timeout  = "45m"
 class = "implementation"
 
 [limits]                   # ladder guards live here, alongside timeouts
-max_attempts_per_task = 4  # global attempt budget → cannot loop-burn accounts
+maxAttemptsPerTask = 4     # global attempt budget → cannot loop-burn accounts
 ```
 
 Three task classes at launch: `mechanical`, `implementation`, `hard`. More can
