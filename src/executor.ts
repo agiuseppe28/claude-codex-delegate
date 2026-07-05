@@ -41,7 +41,6 @@ export class Executor {
   async run(req: ExecRequest): Promise<ExecResult> {
     const outputFile = join(tmpdir(), `ccd-${randomUUID()}.txt`);
     const args = buildCodexArgs({
-      prompt: req.prompt,
       repoPath: req.repoPath,
       model: req.model,
       effort: req.effort,
@@ -51,6 +50,7 @@ export class Executor {
       const outcome = await this.runner('codex', args, {
         cwd: req.repoPath,
         timeoutMs: req.timeoutMs,
+        input: req.prompt,
       });
       const report = this.readOutput(outputFile);
       return {

@@ -27,4 +27,30 @@ describe('run (real cross-spawn, no mocks)', () => {
     expect(out).toBeDefined();
     expect(out.exitCode).not.toBe(0);
   });
+
+  it('delivers `input` to the child process stdin intact', async () => {
+    const out = await run(
+      'node',
+      [
+        '-e',
+        'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>process.stdout.write(d))',
+      ],
+      { input: 'hello-stdin' },
+    );
+    expect(out.stdout).toContain('hello-stdin');
+    expect(out.exitCode).toBe(0);
+  });
+
+  it('delivers a multiline `input` to stdin without truncation', async () => {
+    const multiline = 'line one\nline two\nline three';
+    const out = await run(
+      'node',
+      [
+        '-e',
+        'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>process.stdout.write(d))',
+      ],
+      { input: multiline },
+    );
+    expect(out.stdout).toBe(multiline);
+  });
 });

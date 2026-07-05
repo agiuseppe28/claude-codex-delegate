@@ -11,7 +11,7 @@ export interface RunOutcome {
 export type Runner = (
   file: string,
   args: readonly string[],
-  opts?: { readonly cwd?: string; readonly timeoutMs?: number },
+  opts?: { readonly cwd?: string; readonly timeoutMs?: number; readonly input?: string },
 ) => Promise<RunOutcome>;
 
 /**
@@ -31,13 +31,24 @@ export const run: Runner = (file, args, opts = {}) =>
     let settled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
-    // stdin is 'ignore' (→ immediate EOF): we pass the prompt as an argument,
-    // never via stdin. Leaving stdin open makes CLIs that probe stdin (e.g.
-    // `codex exec` prints "Reading additional input from stdin...") block forever.
+    // When no `input` is given (git/multiauth calls), stdin is 'ignore' (→
+    // immediate EOF). Leaving stdin open with nothing to write would make
+    // CLIs that probe stdin (e.g. `codex exec` prints "Reading additional
+    // input from stdin...") block forever. When `input` IS given (the codex
+    // prompt), stdin is piped: on Windows, npm `.cmd` shims run via cmd.exe,
+    // which truncates a multiline CLI *argument* at the first newline — but
+    // stdin is a raw byte stream cmd.exe never re-parses, so a multiline
+    // prompt survives intact when delivered this way.
     const child = spawn(file, [...args], {
       cwd: opts.cwd,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio:
+        opts.input !== undefined ? ['pipe', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe'],
     });
+
+    if (opts.input !== undefined) {
+      child.stdin?.write(opts.input);
+      child.stdin?.end();
+    }
 
     if (opts.timeoutMs) {
       timer = setTimeout(() => {

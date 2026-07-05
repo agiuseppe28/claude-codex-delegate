@@ -3,7 +3,6 @@ import { describe, it, expect } from 'vitest';
 import { buildCodexArgs } from '../../src/exec/codexArgs.js';
 
 const args = buildCodexArgs({
-  prompt: 'do the thing',
   repoPath: '/abs/repo',
   model: 'flagship-x',
   effort: 'low',
@@ -11,9 +10,13 @@ const args = buildCodexArgs({
 });
 
 describe('buildCodexArgs', () => {
-  it('starts with exec and passes the prompt as one argument', () => {
+  it('starts with exec and ends with the stdin sentinel, never the prompt text', () => {
     expect(args[0]).toBe('exec');
-    expect(args).toContain('do the thing');
+    expect(args).toContain('-');
+    expect(args[args.length - 1]).toBe('-');
+  });
+  it('never contains prompt text anywhere in the args array', () => {
+    expect(args).not.toContain('do the thing');
   });
   it('pins workspace-write sandbox', () =>
     expect(args.join(' ')).toContain('--sandbox workspace-write'));

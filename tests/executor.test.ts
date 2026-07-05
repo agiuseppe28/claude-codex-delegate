@@ -19,9 +19,11 @@ describe('Executor', () => {
     });
 
     expect(runner).toHaveBeenCalledOnce();
-    const [file, args] = runner.mock.calls[0]!;
+    const [file, args, opts] = runner.mock.calls[0]!;
     expect(file).toBe('codex');
     expect(args[0]).toBe('exec');
+    expect(opts?.input).toBe('p');
+    expect(args).not.toContain('p');
     expect(res.report).toContain('2 files changed');
     expect(res.exitCode).toBe(0);
   });
