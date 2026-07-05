@@ -1,0 +1,8 @@
+{
+  "name": "claude-codex-delegate",
+  "version": "0.1.0",
+  "description": "Delegate mechanical execution to Codex under a deterministic hygiene contract, with multi-account switching and a bounded fallback ladder.",
+  "author": { "name": "agius" },
+  "license": "MIT",
+  "keywords": ["claude-code", "codex", "delegation", "plugin"]
+}
