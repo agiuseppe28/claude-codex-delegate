@@ -35,20 +35,43 @@ Executor/wrapper ──► `codex exec` inside the target repo's working dir
   │                   ┌─ error / rate-limit? ──► Fallback controller
   │                   │      retry → switch account → downgrade → hand back
   ▼                   ▼
-Codex report (imposed format) ──► Verifier: project checks + git status
+Codex report (imposed format) ──► Verifier: git status vs. whitelist
   ▼
 Claude marks the task done ONLY if verification passes
 ```
 
 In short: **plan → delegate → verify**. Claude never trusts Codex's own
-account of success — it re-checks the actual repository state (whitelist
-enforcement, project checks, a secret scan) before calling anything done. If
-verification fails, the task re-enters the fallback ladder or is handed back
-to Claude with an exact status report — never silently.
+account of success at face value — the tool re-checks the actual repository
+state before the CLI reports `done` (whitelist enforcement with auto-revert,
+plus a protected-path hard-fail; see the next section for exactly what that
+does and doesn't cover). If verification fails, the task re-enters the
+fallback ladder or is handed back to Claude with an exact status report —
+never silently.
 
 See `docs/superpowers/specs/2026-07-05-claude-codex-delegate-design.md` for
 the full design, including the safety contract, the fallback ladder, and the
 verification cycle.
+
+## What automatic verification does — and does not — cover
+
+To be precise about the safety boundary, `delegate`'s automatic verification
+(`src/verifier.ts`) does exactly two things, every run, non-optionally:
+
+- **Whitelist enforcement with auto-revert** — any file changed outside the
+  spec's `whitelist` is reverted (tracked changes) or removed (untracked
+  files) before the outcome is decided.
+- **Protected-path hard-fail** — any touch to a path matched by
+  `protected-paths.toml` fails verification outright, whitelist or not.
+
+It also supports pluggable `checks` (arbitrary commands run against the repo
+and required to exit 0), but **`delegate` does not enable any by default in
+0.1.0** — on the real CLI path the check list is empty. It does **not** run a
+secret scan, and it does **not** run your project's tests, linter, or build.
+Confirming those, and confirming the spec's `completionCriterion`, is Claude's
+responsibility after the CLI reports `done` — see step 5 of
+`skills/codex-delegate/SKILL.md`. Secret scanning for this repository's own
+source happens in CI via `gitleaks`, not in the per-task verifier; see
+[`SECURITY.md`](./SECURITY.md).
 
 ## Multi-account rotation — an honest note on Terms of Service
 

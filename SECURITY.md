@@ -28,14 +28,22 @@ please report it the same way as a vulnerability (privately, via email) so it
 can be revoked and purged rather than filing a public issue that draws
 attention to it before rotation.
 
-## Runtime secret-scan guard
+## Secret hygiene: what's automated and what isn't
 
-The delegation flow this plugin implements includes a secret-scan step on
-Codex's output before it is ever shown to the user or written to the ledger:
-the verifier scans the diff and report for likely secret patterns and redacts
-or blocks on a match. CI additionally runs
-[`gitleaks`](https://github.com/gitleaks/gitleaks) against every push and pull
-request as a second, independent layer of defense.
+To be precise about what this project automates versus what it doesn't:
+
+- The per-task **verifier** (`src/verifier.ts`) does not scan for secrets. Its
+  automatic checks are whitelist enforcement (with auto-revert of stray
+  changes) and a protected-path hard-fail. There is no pattern-matching
+  secret scan in that path in 0.1.0.
+- The **ledger** (`.codex-delegate.local/ledger.jsonl`) is metadata-only by
+  construction — it records task id, account, model, exit codes, and
+  timestamps, and never writes prompt bodies, diffs, or report text, so there
+  is nothing for a secret to hide in.
+- This repository's own source is scanned in **CI** by
+  [`gitleaks`](https://github.com/gitleaks/gitleaks) on every push and pull
+  request. That protects this project's history; it does not scan the target
+  repos you delegate work into.
 
 ## Supported versions
 

@@ -50,8 +50,8 @@ export class MultiAuth {
     }
   }
 
-  // Label for the ledger (Chunk 7 carry-over). Index-based until we can
-  // inspect account objects post-login.
+  // Label for the ledger. Index-based until we can inspect account objects
+  // post-login.
   async currentAccount(): Promise<string> {
     const s = await this.status();
     const idx = s.runtimeInUseIndex ?? s.activeIndex;

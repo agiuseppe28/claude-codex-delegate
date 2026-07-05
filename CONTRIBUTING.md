@@ -9,10 +9,14 @@ code, not in convention.
 
 Before changing behavior, understand the guiding principle: **safety lives in
 code; judgment lives in Claude.** Anything that could destroy work — sandbox
-flags, the file whitelist, the push/destructive-command ban, secret redaction
-— must be enforced by a deterministic wrapper, never left to a prompt's
-discretion alone. If you're adding a new guard, it belongs in a `[PURE]` or
-`[IO]` unit under `src/`, with tests, not only in `SKILL.md` prose.
+flags, the file whitelist, the push/destructive-command ban — must be
+enforced by a deterministic wrapper, never left to a prompt's discretion
+alone. If you're adding a new guard, it belongs in a `[PURE]` or `[IO]` unit
+under `src/`, with tests, not only in `SKILL.md` prose. Note that automated
+project `checks` (tests/lint/build) and the spec's `completionCriterion` are
+NOT verified by the tool in 0.1.0 — see [`SECURITY.md`](./SECURITY.md) and
+the README for the current boundary of automatic verification, and don't
+describe that boundary as tighter than it is in new docs.
 
 Conversely, guards are a safety net, not a straitjacket: whitelist enforcement
 is post-hoc (check after execution, auto-revert if needed) so Codex can work

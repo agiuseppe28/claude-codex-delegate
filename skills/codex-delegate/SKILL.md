@@ -90,10 +90,17 @@ condition (commit/stash the tree, remove the protected path), and retry.
 
 The command prints one JSON object to stdout on completion:
 
-- **`{"status":"done","report":"..."}`** — Codex finished and verification
-  passed. Report the diff-stat back to the user, then run the project's own
-  verification (tests/lint/build) to double-check before considering the task
-  closed.
+- **`{"status":"done","report":"..."}`** — Codex finished, and the tool's
+  _automatic_ verification passed. Be precise about what that automatic
+  verification actually checked: it means no file outside the `whitelist`
+  was left changed (stray changes are auto-reverted) and no protected path
+  was touched. **It does not mean the project's tests/lint/build pass, and it
+  does not mean the `completionCriterion` is satisfied** — the CLI does not
+  run project checks by default in 0.1.0, and it does not evaluate
+  `completionCriterion` for you. That verification is now your job: run the
+  project's own tests/lint/build and confirm the `completionCriterion` from
+  the spec yourself before reporting the task closed to the user. Only after
+  that should you treat the task as genuinely done.
 - **`{"status":"hand_back",...}`** — the fallback ladder was exhausted
   (rate limits, repeated crashes, no models left) without a clean, verified
   result. Do not leave this hanging: either pick up the task yourself and

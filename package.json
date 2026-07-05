@@ -9,6 +9,19 @@
   "bin": {
     "codex-delegate": "dist/cli.js"
   },
+  "files": [
+    "dist",
+    "templates",
+    "skills",
+    "commands",
+    ".claude-plugin",
+    "CODE_HYGIENE.md",
+    "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md",
+    "SECURITY.md",
+    "CHANGELOG.md",
+    "docs/cli-surface.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -16,7 +29,8 @@
     "test:watch": "vitest",
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write .",
-    "check": "npm run typecheck && npm run lint && npm run test"
+    "check": "npm run typecheck && npm run lint && npm run test",
+    "prepublishOnly": "npm run build"
   },
   "license": "MIT",
   "devDependencies": {
