@@ -3,8 +3,12 @@
   "version": "0.1.0",
   "description": "Delegate mechanical execution tasks from Claude Code to the Codex CLI under a deterministic hygiene contract.",
   "type": "module",
-  "engines": { "node": ">=18.18" },
-  "bin": { "codex-delegate": "dist/cli.js" },
+  "engines": {
+    "node": ">=18.18"
+  },
+  "bin": {
+    "codex-delegate": "dist/cli.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
