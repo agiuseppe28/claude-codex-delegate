@@ -1,0 +1,11 @@
+# Normalize line endings to LF for all text files on every platform.
+# Prevents core.autocrlf on Windows from rewriting checked-out files (which
+# broke a fixture-based test and produced spurious "modified" noise), and keeps
+# the Windows CI job consistent with Linux.
+* text=auto eol=lf
+
+# Binary/asset types that must never be normalized (none yet, listed for clarity).
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
