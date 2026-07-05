@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { run } from '../../src/exec/run.js';
 
-describe('run (real execFile, no mocks)', () => {
+describe('run (real cross-spawn, no mocks)', () => {
   it('captures a non-zero exit code', async () => {
     const out = await run('node', ['-e', 'process.exit(3)']);
     expect(out.exitCode).toBe(3);

@@ -1,5 +1,5 @@
 // src/exec/run.ts
-import { execFile } from 'node:child_process';
+import spawn from 'cross-spawn';
 
 export interface RunOutcome {
   readonly exitCode: number | null;
@@ -14,24 +14,50 @@ export type Runner = (
   opts?: { readonly cwd?: string; readonly timeoutMs?: number },
 ) => Promise<RunOutcome>;
 
-/** Default runner: execFile (argument array, NO shell) → injection-safe. */
+/**
+ * Default runner: spawns via `cross-spawn` with the argument array passed
+ * through untouched — no user input is ever interpolated into a shell
+ * command string. cross-spawn never sets `shell: true`; on Windows it
+ * resolves and executes npm `.cmd`/`.bat` shims directly (which Node's
+ * built-in `execFile`/`spawn` cannot do without a shell since
+ * CVE-2024-27980), escaping arguments itself so shim resolution doesn't
+ * reopen shell injection.
+ */
 export const run: Runner = (file, args, opts = {}) =>
   new Promise((resolve) => {
-    const child = execFile(
-      file,
-      [...args],
-      { cwd: opts.cwd, timeout: opts.timeoutMs ?? 0, maxBuffer: 64 * 1024 * 1024 },
-      (err, stdout, stderr) => {
-        const timedOut = Boolean(err && 'killed' in err && err.killed);
-        resolve({
-          exitCode: err && typeof err.code === 'number' ? err.code : err ? 1 : 0,
-          stdout: stdout.toString(),
-          stderr: stderr.toString(),
-          timedOut,
-        });
-      },
-    );
-    child.on('error', () =>
-      resolve({ exitCode: 1, stdout: '', stderr: 'spawn error', timedOut: false }),
-    );
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const child = spawn(file, [...args], { cwd: opts.cwd });
+
+    if (opts.timeoutMs) {
+      timer = setTimeout(() => {
+        timedOut = true;
+        child.kill();
+      }, opts.timeoutMs);
+    }
+
+    child.stdout?.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
+    child.on('error', () => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve({ exitCode: 1, stdout: '', stderr: 'spawn error', timedOut: false });
+    });
+
+    child.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve({ exitCode: timedOut ? null : code, stdout, stderr, timedOut });
+    });
   });
