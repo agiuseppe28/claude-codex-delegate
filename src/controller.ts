@@ -84,6 +84,27 @@ export class Controller {
           exitCode: 0,
           at: this.c.now(),
         });
+        if (verdict.ok && verdict.changed.length === 0) {
+          // A clean exit with zero file changes is exactly what the Windows
+          // multiline-prompt truncation bug looked like (the prompt never
+          // reached Codex, so it did nothing and exited 0). Don't report a
+          // false `done` — hand back so a human can see nothing happened.
+          this.c.ledger.record({
+            taskId: spec.taskId,
+            account: await this.c.multiAuth.currentAccount(),
+            model,
+            taskClass: spec.taskClass,
+            rung: 'no_change',
+            exitCode: 0,
+            at: this.c.now(),
+          });
+          return {
+            status: 'hand_back',
+            lastError:
+              'Codex exited 0 but produced no file changes (possible no-op — the ' +
+              'prompt may not have been received, or the task was already satisfied).',
+          };
+        }
         if (verdict.ok) return { status: 'done', report: res.report };
         // verification failed → treat as crash-class and continue the ladder
       }

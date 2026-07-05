@@ -38,7 +38,7 @@ function collaborators(over: Record<string, unknown> = {}): Record<string, unkno
       verify: vi.fn(() =>
         Promise.resolve({
           ok: true,
-          changed: [],
+          changed: ['src/a.ts'],
           reverted: [],
           protectedTouched: [],
           failedChecks: [],
@@ -130,7 +130,7 @@ describe('Controller', () => {
         })
         .mockResolvedValueOnce({
           ok: true,
-          changed: [],
+          changed: ['src/a.ts'],
           reverted: [],
           protectedTouched: [],
           failedChecks: [],
@@ -145,6 +145,32 @@ describe('Controller', () => {
     const out = await new Controller(c as never).delegate(spec, policy);
     expect(executor.run).toHaveBeenCalledTimes(2); // failed verify → retry → success
     expect(out.status).toBe('done');
+  });
+
+  it('hands back (not done) when the run is clean and verified but produced zero file changes', async () => {
+    const verifier = {
+      verify: vi.fn(() =>
+        Promise.resolve({
+          ok: true,
+          changed: [],
+          reverted: [],
+          protectedTouched: [],
+          failedChecks: [],
+        }),
+      ),
+    };
+    const executor = {
+      run: vi.fn(() =>
+        Promise.resolve({ exitCode: 0, stderr: '', report: 'ok', timedOut: false }),
+      ),
+    };
+    const c = collaborators({ verifier, executor });
+    const out = await new Controller(c as never).delegate(spec, policy);
+    expect(out.status).toBe('hand_back');
+    expect(out.lastError).toContain('no file changes');
+    // Zero-change is treated as a definitive signal, not something to retry
+    // into an infinite loop: exactly one execution attempt.
+    expect(executor.run).toHaveBeenCalledTimes(1);
   });
 
   it('hands back to Claude when the attempt budget is exhausted', async () => {
