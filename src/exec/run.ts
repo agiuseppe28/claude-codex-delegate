@@ -31,7 +31,13 @@ export const run: Runner = (file, args, opts = {}) =>
     let settled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const child = spawn(file, [...args], { cwd: opts.cwd });
+    // stdin is 'ignore' (→ immediate EOF): we pass the prompt as an argument,
+    // never via stdin. Leaving stdin open makes CLIs that probe stdin (e.g.
+    // `codex exec` prints "Reading additional input from stdin...") block forever.
+    const child = spawn(file, [...args], {
+      cwd: opts.cwd,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
 
     if (opts.timeoutMs) {
       timer = setTimeout(() => {
