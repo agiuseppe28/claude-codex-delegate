@@ -32,7 +32,7 @@ describe('loadModelPolicy', () => {
   });
 
   it('rejects a class missing its fallback array', () => {
-    const bad = toml.replace('fallback = ["flagship-x", "general-x"]\n', '');
+    const bad = toml.replace(/fallback = \["flagship-x", "general-x"\]\r?\n/, '');
     expect(() => loadModelPolicy(bad)).toThrow(/fallback/);
   });
 
