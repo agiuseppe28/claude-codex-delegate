@@ -1,0 +1,25 @@
+# tests/config/fixtures/policy.toml
+[models.flagship-x]
+tier = "flagship"
+[models.fast-x]
+tier = "fast"
+[models.general-x]
+tier = "general"
+
+[classes.mechanical]
+model = "fast-x"
+effort = "low"
+fallback = ["flagship-x", "general-x"]
+timeout = "10m"
+
+[classes.implementation]
+model = "flagship-x"
+effort = "medium"
+fallback = ["general-x"]
+timeout = "30m"
+
+[default]
+class = "implementation"
+
+[limits]
+maxAttemptsPerTask = 4
