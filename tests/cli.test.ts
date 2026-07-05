@@ -1,8 +1,9 @@
 // tests/cli.test.ts
 import { describe, it, expect, vi } from 'vitest';
-import { dispatch } from '../src/cli.js';
+import { dispatch, isLedgerDirPath, realGatherPreflightFacts } from '../src/cli.js';
 import type { CliHandlers } from '../src/cli.js';
 import type { DoctorReport } from '../src/doctor.js';
+import type { Runner } from '../src/exec/run.js';
 
 function handlers(over: Partial<CliHandlers> = {}): CliHandlers {
   return {
@@ -224,5 +225,65 @@ describe('runDelegate enforcement', () => {
     });
     expect(controllerDelegate).toHaveBeenCalledOnce();
     expect(code).not.toBe(0);
+  });
+});
+
+describe('preflight dirty-path filtering (tool ledger dir)', () => {
+  it('recognizes the ledger dir itself and any path under it', () => {
+    expect(isLedgerDirPath('.codex-delegate.local')).toBe(true);
+    expect(isLedgerDirPath('.codex-delegate.local/')).toBe(true);
+    expect(isLedgerDirPath('.codex-delegate.local/ledger.jsonl')).toBe(true);
+    expect(isLedgerDirPath('.codex-delegate.local/model-policy.toml')).toBe(true);
+  });
+
+  it('does not match unrelated paths, including near-miss prefixes', () => {
+    expect(isLedgerDirPath('src/a.ts')).toBe(false);
+    expect(isLedgerDirPath('.codex-delegate.local-other/file')).toBe(false);
+    expect(isLedgerDirPath('nested/.codex-delegate.local/ledger.jsonl')).toBe(false);
+  });
+
+  it('a lone ledger dirty entry is filtered out of gathered preflight facts', async () => {
+    const runner: Runner = vi.fn((file: string, args: readonly string[]) => {
+      if (args[0] === 'rev-parse') {
+        return Promise.resolve({
+          exitCode: 0,
+          stdout: 'true\n',
+          stderr: '',
+          timedOut: false,
+        });
+      }
+      // Simulate `git status --porcelain -z` reporting only the untracked
+      // ledger directory as dirty.
+      return Promise.resolve({
+        exitCode: 0,
+        stdout: '?? .codex-delegate.local/\0',
+        stderr: '',
+        timedOut: false,
+      });
+    });
+    const facts = await realGatherPreflightFacts('/abs/repo', runner);
+    expect(facts.isGitRepo).toBe(true);
+    expect(facts.dirtyPaths).toEqual([]);
+  });
+
+  it('still reports genuinely dirty paths alongside a filtered ledger entry', async () => {
+    const runner: Runner = vi.fn((file: string, args: readonly string[]) => {
+      if (args[0] === 'rev-parse') {
+        return Promise.resolve({
+          exitCode: 0,
+          stdout: 'true\n',
+          stderr: '',
+          timedOut: false,
+        });
+      }
+      return Promise.resolve({
+        exitCode: 0,
+        stdout: '?? .codex-delegate.local/\0 M src/a.ts\0',
+        stderr: '',
+        timedOut: false,
+      });
+    });
+    const facts = await realGatherPreflightFacts('/abs/repo', runner);
+    expect(facts.dirtyPaths).toEqual(['src/a.ts']);
   });
 });

@@ -154,7 +154,16 @@ function readDenyGlobs(path: string): readonly string[] {
   return raw.globs ?? [];
 }
 
-async function realGatherPreflightFacts(
+// The tool's own ledger directory is untracked-by-design (see localDir()) and
+// must never itself trip the next delegation's dirty-tree preflight.
+const LEDGER_DIR_PREFIX = '.codex-delegate.local/';
+
+/** Exported for direct unit testing of the dirty-path filter (no git spawn needed). */
+export function isLedgerDirPath(path: string): boolean {
+  return path === LEDGER_DIR_PREFIX.slice(0, -1) || path.startsWith(LEDGER_DIR_PREFIX);
+}
+
+export async function realGatherPreflightFacts(
   repoPath: string,
   runner: Runner = defaultRunner,
 ): Promise<PreflightFacts> {
@@ -164,7 +173,8 @@ async function realGatherPreflightFacts(
   const isGitRepo = gitCheck.exitCode === 0 && gitCheck.stdout.trim() === 'true';
   if (!isGitRepo) return { isGitRepo: false, dirtyPaths: [] };
   const status = await runner('git', ['status', '--porcelain', '-z'], { cwd: repoPath });
-  return { isGitRepo: true, dirtyPaths: parsePorcelain(status.stdout) };
+  const dirtyPaths = parsePorcelain(status.stdout).filter((p) => !isLedgerDirPath(p));
+  return { isGitRepo: true, dirtyPaths };
 }
 
 function buildRealCollaborators(repoRoot: string): {
