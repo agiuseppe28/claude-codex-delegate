@@ -208,6 +208,34 @@ describe('Controller', () => {
     }
   });
 
+  it('surfaces the gate failure reason (failed checks) in the hand_back lastError', async () => {
+    // Every run exits 0 but the checks never pass — the ladder eventually hands
+    // back, and the reason must be the gate failure, not just the (empty) stderr
+    // of the last attempt. This is exactly the case that was invisible before:
+    // a failing `npm run test` masked behind a fallback model's crash.
+    const verifier = {
+      verify: vi.fn(() =>
+        Promise.resolve({
+          ok: false,
+          changed: ['src/a.ts'],
+          reverted: [],
+          protectedTouched: [],
+          failedChecks: ['npm run test'],
+        }),
+      ),
+    };
+    const executor = {
+      run: vi.fn(() =>
+        Promise.resolve({ exitCode: 0, stderr: '', report: 'ok', timedOut: false }),
+      ),
+    };
+    const c = collaborators({ verifier, executor });
+    const out = await new Controller(c as never).delegate(spec, policy);
+    expect(out.status).toBe('hand_back');
+    expect(out.lastError).toContain('gate failed');
+    expect(out.lastError).toContain('npm run test');
+  });
+
   it('does not reset retriedTransient after a downgrade (task-global flag)', async () => {
     const executor = {
       run: vi.fn(() =>

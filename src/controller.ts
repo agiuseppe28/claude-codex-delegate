@@ -47,6 +47,33 @@ function tailError(stderr: string): string {
     : stderr;
 }
 
+/** Human-readable reason a verdict was not ok, or '' if it was clean. */
+function describeVerdict(verdict: Verdict): string {
+  const parts: string[] = [];
+  if (verdict.failedChecks.length > 0)
+    parts.push(`failed checks: ${verdict.failedChecks.join('; ')}`);
+  if (verdict.reverted.length > 0)
+    parts.push(
+      `reverted stray paths (outside whitelist): ${verdict.reverted.join(', ')}`,
+    );
+  if (verdict.protectedTouched.length > 0)
+    parts.push(`touched protected paths: ${verdict.protectedTouched.join(', ')}`);
+  return parts.join(' | ');
+}
+
+/**
+ * Build the hand_back `lastError`, leading with the gate failure reason (if a
+ * verdict failed at any point) so it is not buried behind the last model's raw
+ * stderr — which may be from a different, later fallback attempt.
+ */
+function composeLastError(verdictNote: string, stderr: string): string {
+  const tail = tailError(stderr);
+  if (!verdictNote) return tail;
+  return tail
+    ? `gate failed — ${verdictNote}\n---\n${tail}`
+    : `gate failed — ${verdictNote}`;
+}
+
 export class Controller {
   constructor(private readonly c: Collaborators) {}
 
@@ -66,6 +93,11 @@ export class Controller {
     let chainIndex = 0;
     let retriedTransient = false;
     let lastStderr = '';
+    // The most recent verdict failure reason (failed checks / reverted strays /
+    // protected paths). Captured so a hand_back surfaces WHY the gate failed —
+    // otherwise the outcome only carries the last model's stderr, which hides a
+    // failing `npm test` behind, e.g., a fallback model's crash.
+    let lastVerdictNote = '';
     for (let attempt = 1; attempt <= policy.limits.maxAttemptsPerTask; attempt++) {
       const model =
         resolved.chain[chainIndex] ?? resolved.chain[resolved.chain.length - 1]!;
@@ -119,7 +151,9 @@ export class Controller {
           };
         }
         if (verdict.ok) return { status: 'done', report: res.report };
-        // verification failed → treat as crash-class and continue the ladder
+        // verification failed → treat as crash-class and continue the ladder.
+        // Record why, so the eventual hand_back can explain the gate failure.
+        lastVerdictNote = describeVerdict(verdict);
       }
 
       const failure =
@@ -154,7 +188,7 @@ export class Controller {
         return {
           status: 'hand_back',
           report: res.report,
-          lastError: tailError(lastStderr),
+          lastError: composeLastError(lastVerdictNote, lastStderr),
         };
       await this.c.snapshot.restore(spec.repoPath); // idempotent retry
       if (action.type === 'switch_account') await this.c.multiAuth.switchToNextHealthy();
@@ -165,6 +199,9 @@ export class Controller {
       // instead of retrying again.
       if (action.type === 'retry') retriedTransient = true;
     }
-    return { status: 'hand_back', lastError: tailError(lastStderr) };
+    return {
+      status: 'hand_back',
+      lastError: composeLastError(lastVerdictNote, lastStderr),
+    };
   }
 }

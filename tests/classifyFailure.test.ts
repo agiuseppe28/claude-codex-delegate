@@ -43,6 +43,28 @@ describe('classifyFailure', () => {
     expect(
       classifyFailure({ exitCode: 1, stderr: 'model gpt-x not found', timedOut: false }),
     ).toBe('model_unavailable'));
+  it('classifies "model is not supported" as model_unavailable', () =>
+    expect(
+      classifyFailure({
+        exitCode: 1,
+        stderr:
+          "The 'gpt-5.3-codex' model is not supported when using Codex with a ChatGPT account.",
+        timedOut: false,
+      }),
+    ).toBe('model_unavailable'));
+  it('prefers model_unavailable over the auth noise that co-occurs in stderr', () =>
+    // Real-world stderr: an unrelated MCP "AuthRequired / invalid_request /
+    // no access token" burst precedes the model-not-supported error. Must NOT
+    // be classified as `auth` (which would trigger a pointless account switch).
+    expect(
+      classifyFailure({
+        exitCode: 1,
+        stderr:
+          'ERROR AuthRequired invalid_request "No access token was provided" ... ' +
+          "The 'gpt-5.3-codex' model is not supported when using Codex with a ChatGPT account.",
+        timedOut: false,
+      }),
+    ).toBe('model_unavailable'));
   it('maps timeout flag', () =>
     expect(classifyFailure({ exitCode: null, stderr: '', timedOut: true })).toBe(
       'timeout',

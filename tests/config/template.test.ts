@@ -34,6 +34,25 @@ describe('shipped templates/model-policy.toml', () => {
     const policy = loadModelPolicy(policyToml);
     expect(policy.models['gpt-5.5']?.tier).toBe('flagship');
   });
+
+  it('ships no `-codex` model id (unavailable on ChatGPT-auth accounts)', () => {
+    // Regression guard: a `-codex` id in the chain makes `codex exec` fail with
+    // "model is not supported when using Codex with a ChatGPT account", burning
+    // the whole fallback ladder into a hand_back with no work done.
+    const policy = loadModelPolicy(policyToml);
+    const ids = Object.keys(policy.models);
+    expect(ids.every((id) => !id.endsWith('-codex'))).toBe(true);
+  });
+
+  it('lists every class fallback as a declared model (no dangling id)', () => {
+    const policy = loadModelPolicy(policyToml);
+    const declared = new Set(Object.keys(policy.models));
+    for (const cls of ['mechanical', 'implementation', 'hard'] as const) {
+      for (const id of resolve(policy, cls).chain) {
+        expect(declared.has(id)).toBe(true);
+      }
+    }
+  });
 });
 
 describe('shipped templates/protected-paths.toml', () => {
