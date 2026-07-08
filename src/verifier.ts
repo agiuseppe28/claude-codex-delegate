@@ -27,9 +27,18 @@ export class Verifier {
   ) {}
 
   async verify(req: VerifyRequest): Promise<Verdict> {
-    const status = await this.run('git', ['status', '--porcelain', '-z'], {
-      cwd: req.repoPath,
-    });
+    // `--untracked-files=all` is REQUIRED: without it, git collapses a brand-new
+    // untracked directory into a single dir token (e.g. `src/engine/`) instead
+    // of listing its files. A file-level whitelist (`src/engine/types.ts`, ...)
+    // then never matches that dir token, so the whole directory is misjudged as
+    // a stray-outside-whitelist and reverted — deleting legitimate work and
+    // failing the checks that follow. Enumerating untracked files individually
+    // makes each created path matchable against the whitelist.
+    const status = await this.run(
+      'git',
+      ['status', '--porcelain', '-z', '--untracked-files=all'],
+      { cwd: req.repoPath },
+    );
     const changed = parsePorcelain(status.stdout);
     const protectedTouched = changed.filter((p) => this.deny.isProtected(p));
     const stray = outsideWhitelist(changed, req.whitelist);

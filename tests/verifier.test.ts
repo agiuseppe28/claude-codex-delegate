@@ -37,6 +37,28 @@ describe('Verifier', () => {
     expect(verdict.reverted).toEqual([]);
   });
 
+  it('lists untracked files individually (--untracked-files=all) so new-dir files match the whitelist', async () => {
+    // Regression: git collapses a brand-new untracked directory into a single
+    // dir token unless --untracked-files=all is passed. Without the flag the
+    // whole `src/engine/` dir was misjudged as a stray and deleted.
+    const runner = runnerScript({
+      'status --porcelain': { stdout: '?? src/engine/a.ts\0?? src/engine/b.ts\0' },
+    });
+    const v = new Verifier(runner, notProtected);
+    const verdict = await v.verify({
+      repoPath: '/r',
+      whitelist: ['src/engine/a.ts', 'src/engine/b.ts'],
+      checks: [],
+    });
+    expect(verdict.reverted).toEqual([]);
+    expect(verdict.ok).toBe(true);
+    expect(runner).toHaveBeenCalledWith(
+      'git',
+      expect.arrayContaining(['status', '--porcelain', '-z', '--untracked-files=all']),
+      expect.anything(),
+    );
+  });
+
   it('auto-reverts out-of-whitelist changes and fails the verdict', async () => {
     const runner = runnerScript({
       'status --porcelain': { stdout: ' M src/a.ts\0 M src/evil.ts\0' },

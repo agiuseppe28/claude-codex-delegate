@@ -156,9 +156,13 @@ export class Controller {
         lastVerdictNote = describeVerdict(verdict);
       }
 
+      // exitCode 0 can only reach here when the post-run verdict failed (a done
+      // or no-op would have returned already), so it is a GATE failure — a
+      // property of the produced code, not the model. Keep it distinct from a
+      // real Codex crash so the ladder never downgrades the model for it.
       const failure =
         res.exitCode === 0
-          ? 'crash'
+          ? 'gate'
           : classifyFailure({
               exitCode: res.exitCode,
               stderr: res.stderr,

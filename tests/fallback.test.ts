@@ -36,4 +36,15 @@ describe('nextAction', () => {
     expect(act({ retriedTransient: true }, 'crash')).toBe('downgrade'));
   it('hands back on repeated crash once the model chain is exhausted', () =>
     expect(act({ retriedTransient: true, chainIndex: 2 }, 'crash')).toBe('hand_back'));
+
+  it('retries a gate failure once on the same model', () =>
+    expect(act({}, 'gate')).toBe('retry'));
+  it('hands back on a repeated gate failure (never burns more attempts)', () =>
+    expect(act({ retriedTransient: true }, 'gate')).toBe('hand_back'));
+  it('NEVER downgrades on a gate failure, even with a fallback model available', () =>
+    expect(act({ retriedTransient: true, chainIndex: 0, chainLength: 3 }, 'gate')).toBe(
+      'hand_back',
+    ));
+  it('NEVER switches account on a gate failure, even when another is healthy', () =>
+    expect(act({ otherAccountHealthy: true }, 'gate')).not.toBe('switch_account'));
 });
