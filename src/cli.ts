@@ -6,9 +6,17 @@
 // `refresh-models`. IO (fs, process spawning, argv/exit) is isolated here;
 // the pure decisions (validateDelegationSpec, evaluatePreflight) live in
 // `src/preflight.ts` and are only invoked, never re-implemented.
-import { existsSync, mkdirSync, readFileSync, appendFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  appendFileSync,
+  realpathSync,
+} from 'node:fs';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
+import { connect } from 'node:net';
 import { parse as parseToml } from 'smol-toml';
 
 import { run as defaultRunner } from './exec/run.js';
@@ -110,7 +118,73 @@ async function buildDoctorDeps(repoRoot: string): Promise<DoctorDeps> {
       const status = await new MultiAuth(defaultRunner).status();
       return status.accountCount > 0;
     },
+    checkProviderRouting: probeGlobalCodexRouting,
   };
+}
+
+const CODEX_HOME = (): string => process.env.CODEX_HOME ?? join(homedir(), '.codex');
+
+/** Can we open a TCP connection to host:port within `timeoutMs`? */
+function isPortListening(host: string, port: number, timeoutMs = 800): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = connect({ host, port });
+    let done = false;
+    const finish = (up: boolean): void => {
+      if (done) return;
+      done = true;
+      socket.destroy();
+      resolve(up);
+    };
+    socket.setTimeout(timeoutMs);
+    socket.once('connect', () => finish(true));
+    socket.once('timeout', () => finish(false));
+    socket.once('error', () => finish(false));
+  });
+}
+
+/**
+ * Real implementation of the doctor footgun probe. Reads the global Codex
+ * config; if `model_provider` routes through a loopback proxy that isn't
+ * listening, reports it (that is exactly the state that makes every `codex`
+ * call fail with `stream disconnected`). Any read/parse error is treated as
+ * "ok" — the probe must never itself turn doctor red on an unrelated hiccup.
+ */
+async function probeGlobalCodexRouting(): Promise<{ ok: boolean; detail: string }> {
+  const configPath = join(CODEX_HOME(), 'config.toml');
+  let provider: string | undefined;
+  let baseUrl: string | undefined;
+  try {
+    if (!existsSync(configPath)) return { ok: true, detail: 'no global config' };
+    const cfg = parseToml(readFileSync(configPath, 'utf8')) as {
+      model_provider?: string;
+      model_providers?: Record<string, { base_url?: string }>;
+    };
+    provider = cfg.model_provider;
+    if (!provider) return { ok: true, detail: 'native (no provider override)' };
+    baseUrl = cfg.model_providers?.[provider]?.base_url;
+  } catch {
+    return { ok: true, detail: 'config unreadable — skipped' };
+  }
+  if (!baseUrl) return { ok: true, detail: `provider '${provider}' has no base_url` };
+  let url: URL;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    return { ok: true, detail: 'base_url unparseable — skipped' };
+  }
+  const isLoopback = url.hostname === '127.0.0.1' || url.hostname === 'localhost';
+  if (!isLoopback) return { ok: true, detail: `provider '${provider}' is remote` };
+  const port = Number(url.port);
+  const up = await isPortListening(url.hostname, port);
+  return up
+    ? { ok: true, detail: `proxy '${provider}' reachable on :${port}` }
+    : {
+        ok: false,
+        detail:
+          `global config routes codex through '${provider}' (${baseUrl}) but nothing ` +
+          `is listening on :${port} — every codex call will fail. Fix: ` +
+          `codex-multi-auth rotation disable`,
+      };
 }
 
 async function handleDoctor(): Promise<DoctorReport> {
@@ -206,7 +280,9 @@ function buildRealCollaborators(repoRoot: string): {
   });
 
   return {
-    delegate: (spec, policy) => controller.delegate(spec, policy),
+    // Thread the spec's optional gate commands into the verifier so a `done`
+    // outcome actually means the checks passed — not merely that Codex exited.
+    delegate: (spec, policy) => controller.delegate(spec, policy, spec.checks ?? []),
   };
 }
 
@@ -251,6 +327,21 @@ export async function runDelegate(specFile: string, deps: DelegateDeps): Promise
         'Commit/stash your changes and retry.',
     );
     return 1;
+  }
+
+  // Announce escalated sandbox use loudly. 'default' is silent (the norm);
+  // 'network'/'full' are deliberate grants and must be visible in the run log.
+  if (spec.sandboxLevel && spec.sandboxLevel !== 'default') {
+    console.error(
+      `delegate: ELEVATED SANDBOX '${spec.sandboxLevel}' for task ${spec.taskId} ` +
+        `(protected-path deny-list and clean-tree preflight still enforced).`,
+    );
+  }
+  if (spec.auth === 'rotate') {
+    console.error(
+      `delegate: ROTATION AUTH for task ${spec.taskId} (multi-account, scoped to ` +
+        `this run; global Codex config left untouched).`,
+    );
   }
 
   const outcome = await deps.controllerDelegate(spec, policy);
@@ -309,8 +400,25 @@ async function main(): Promise<void> {
   process.exit(code);
 }
 
-const isDirectRun = process.argv[1] === fileURLToPath(import.meta.url);
-if (isDirectRun) {
+/**
+ * True when this module is the process entry point. Both sides are resolved
+ * through realpath because a global `npm i -g` (and especially a `npm link`ed
+ * dev checkout) exposes the bin via a SYMLINK: `process.argv[1]` is then the
+ * symlink path while `import.meta.url` is the realpath, so a raw `===` compare
+ * silently fails and `main()` never runs — turning the whole CLI into a no-op.
+ */
+function computeIsDirectRun(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  const self = fileURLToPath(import.meta.url);
+  try {
+    return realpathSync(entry) === realpathSync(self);
+  } catch {
+    return entry === self;
+  }
+}
+
+if (computeIsDirectRun()) {
   main().catch((err: unknown) => {
     console.error(err);
     process.exit(1);

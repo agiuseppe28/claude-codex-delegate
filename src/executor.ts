@@ -5,7 +5,8 @@ import { readFileSync, rmSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import type { Runner } from './exec/run.js';
 import { buildCodexArgs } from './exec/codexArgs.js';
-import type { Effort } from './config/types.js';
+import { resolveCodexRuntime } from './exec/authRuntime.js';
+import type { AuthMode, Effort, SandboxLevel } from './config/types.js';
 
 export interface ExecRequest {
   readonly prompt: string;
@@ -13,6 +14,8 @@ export interface ExecRequest {
   readonly model: string;
   readonly effort: Effort;
   readonly timeoutMs: number;
+  readonly sandboxLevel: SandboxLevel;
+  readonly auth: AuthMode;
 }
 
 export interface ExecResult {
@@ -45,12 +48,17 @@ export class Executor {
       model: req.model,
       effort: req.effort,
       outputFile,
+      sandboxLevel: req.sandboxLevel,
     });
+    const runtime = resolveCodexRuntime(req.auth);
     try {
-      const outcome = await this.runner('codex', args, {
+      const outcome = await this.runner(runtime.bin, args, {
         cwd: req.repoPath,
         timeoutMs: req.timeoutMs,
         input: req.prompt,
+        // Only attach env when the runtime supplies one (exactOptionalPropertyTypes
+        // forbids passing an explicit `undefined`).
+        ...(runtime.env ? { env: runtime.env } : {}),
       });
       const report = this.readOutput(outputFile);
       return {

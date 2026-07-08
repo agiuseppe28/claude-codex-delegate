@@ -58,16 +58,19 @@ Every field below is **required** except `verbatimFiles`; the CLI's
 `validateDelegationSpec` rejects a spec missing any of them, and an empty
 `whitelist` is rejected unconditionally (it is the primary safety guard).
 
-| Field                      | Meaning                                                                                                                                                       |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `taskId`                   | Short stable identifier, e.g. `"CCD-42"`.                                                                                                                     |
-| `repoPath`                 | **Absolute** path to the target repo.                                                                                                                         |
-| `branch`                   | Branch name the work belongs to (informational; does not create or check out a branch).                                                                       |
-| `taskClass`                | One of the classes from step 2.                                                                                                                               |
-| `instructions`             | What Codex must do — precise, unambiguous, self-contained.                                                                                                    |
-| `whitelist`                | **Non-empty** array of repo-relative paths Codex may create or modify. Nothing outside this list will survive verification — stray changes are auto-reverted. |
-| `completionCriterion`      | A verifiable statement of "done" (a command that passes, a string that appears/disappears).                                                                   |
-| `verbatimFiles` (optional) | Map of path → exact file content Codex must write byte-for-byte, when you already know the precise content and don't want it improvised.                      |
+| Field                      | Meaning                                                                                                                                                                                                                                                                                                   |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `taskId`                   | Short stable identifier, e.g. `"CCD-42"`.                                                                                                                                                                                                                                                                 |
+| `repoPath`                 | **Absolute** path to the target repo.                                                                                                                                                                                                                                                                     |
+| `branch`                   | Branch name the work belongs to (informational; does not create or check out a branch).                                                                                                                                                                                                                   |
+| `taskClass`                | One of the classes from step 2.                                                                                                                                                                                                                                                                           |
+| `instructions`             | What Codex must do — precise, unambiguous, self-contained.                                                                                                                                                                                                                                                |
+| `whitelist`                | **Non-empty** array of repo-relative paths Codex may create or modify. Nothing outside this list will survive verification — stray changes are auto-reverted.                                                                                                                                             |
+| `completionCriterion`      | A verifiable statement of "done" (a command that passes, a string that appears/disappears).                                                                                                                                                                                                               |
+| `verbatimFiles` (optional) | Map of path → exact file content Codex must write byte-for-byte, when you already know the precise content and don't want it improvised.                                                                                                                                                                  |
+| `sandboxLevel` (optional)  | Sandbox escalation. Omit (or `"default"`) for the locked-down norm. `"network"` = workspace-write with network ON. `"full"` = `danger-full-access`. See step 6 before escalating.                                                                                                                         |
+| `auth` (optional)          | Account path for this run. Omit (or `"native"`) to use the user's own logged-in Codex account. `"rotate"` runs through the multi-account wrapper scoped to this delegation only — never touches the global Codex config. Use when a long/expensive run risks exhausting one account's rate window.        |
+| `checks` (optional)        | Array of `[command, [args...]]` gate pairs run **after** Codex exits (in `repoPath`, on the host). Any non-zero exit turns the outcome into `hand_back`. This is how you make `done` actually mean "the gate passed" — e.g. `[["npm", ["test"]], ["bash", ["-c", "docker compose up -d && ./gate.sh"]]]`. |
 
 Write the spec to a JSON file (e.g. in a temp/scratch location) and pass its
 path to the CLI. Example:
@@ -101,17 +104,18 @@ condition (commit/stash the tree, remove the protected path), and retry.
 
 The command prints one JSON object to stdout on completion:
 
-- **`{"status":"done","report":"..."}`** — Codex finished, and the tool's
-  _automatic_ verification passed. Be precise about what that automatic
-  verification actually checked: it means no file outside the `whitelist`
-  was left changed (stray changes are auto-reverted) and no protected path
-  was touched. **It does not mean the project's tests/lint/build pass, and it
-  does not mean the `completionCriterion` is satisfied** — the CLI does not
-  run project checks by default in 0.1.0, and it does not evaluate
-  `completionCriterion` for you. That verification is now your job: run the
-  project's own tests/lint/build and confirm the `completionCriterion` from
-  the spec yourself before reporting the task closed to the user. Only after
-  that should you treat the task as genuinely done.
+- **`{"status":"done","report":"..."}`** — Codex finished and the tool's
+  automatic verification passed: no file outside the `whitelist` was left
+  changed (stray changes are auto-reverted), no protected path was touched,
+  **and every command in `checks` (if you supplied any) exited 0**. So the
+  strength of `done` is exactly as strong as the `checks` you provided. If you
+  passed the real gate as `checks` (tests, lint, the turnkey/Docker gate — now
+  runnable thanks to `sandboxLevel`), `done` means the gate is green and you
+  can report it closed. If you supplied **no** `checks`, `done` only attests
+  the whitelist/protected-path guards — you must still run the project's own
+  tests/build and confirm the `completionCriterion` yourself before closing.
+  Prefer encoding the completion criterion as `checks` so the tool enforces it
+  instead of you doing it by hand.
 - **`{"status":"hand_back",...}`** — the fallback ladder was exhausted
   (rate limits, repeated crashes, no models left) without a clean, verified
   result. Do not leave this hanging: either pick up the task yourself and
@@ -119,15 +123,43 @@ The command prints one JSON object to stdout on completion:
   failed, what's left) so the user can decide. Never silently retry the same
   delegate call in a loop.
 
-### 6. Safety flags are non-negotiable
+### 6. Sandbox level — default locked, escalation is opt-in
 
-The sandbox mode, network-off flag, approval policy, and protected-path
-deny-list are hard-coded in the tool (`src/exec/codexArgs.ts`,
-`src/config/protectedPaths.ts`) and are not exposed as spec fields. Never ask
-the tool to run with a broader sandbox, network access, or approval bypass,
-and never suggest editing those files to "unblock" a delegation — if Codex
-needs more access than the contract allows, the task is not a good candidate
-for delegation.
+The mapping from level to concrete flags is hard-coded in one place
+(`src/exec/codexArgs.ts`), and the protected-path deny-list
+(`src/config/protectedPaths.ts`) and clean-tree preflight apply at **every**
+level — those are never negotiable and never touched to "unblock" a run.
+`approval_policy="never"` is also invariant (the CLI is always
+non-interactive).
+
+What _is_ selectable, via the optional `sandboxLevel` spec field, is how wide
+the OS sandbox is:
+
+- **`default`** (omit the field) — `workspace-write`, network OFF. This is the
+  norm; use it unless you have a concrete reason not to.
+- **`network`** — `workspace-write` but network ON. For tasks that must reach
+  the network (install a dependency, pull a package/image) while all writes
+  stay confined to the workspace.
+- **`full`** — `danger-full-access`: no OS filesystem sandbox and network ON.
+  Only for tasks that genuinely cannot self-verify otherwise — driving Docker,
+  a local postgres, or a full turnkey gate. The deny-list still blocks
+  protected paths and the tree must still be clean.
+
+Rules for escalating:
+
+- **Escalate only when the task cannot be verified without it.** If Codex can
+  self-check the pure half of a task with plain unit tests, keep it at
+  `default` and gate the rest yourself. Prefer the narrowest level that works
+  (`network` before `full`).
+- Escalation is a deliberate choice recorded in the audit trail: every ledger
+  row carries the `sandboxLevel`, and the CLI prints a loud `ELEVATED SANDBOX`
+  line on stderr for any non-default run.
+- An unrecognized `sandboxLevel` is rejected by `validateDelegationSpec` — the
+  tool never silently widens.
+- A wider sandbox does not lower the bar for a good delegation candidate: the
+  task must still be fully specifiable, with a closed whitelist and a
+  verifiable completion criterion. If it needs interactive judgment, don't
+  delegate it regardless of sandbox level.
 
 The `instructions` text is delivered to Codex via stdin (`codex exec -`), not
 as a CLI argument — this keeps multiline prompts intact across platforms and

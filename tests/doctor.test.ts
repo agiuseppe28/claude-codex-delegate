@@ -8,6 +8,7 @@ describe('runDoctor', () => {
     which: () => true,
     policyExists: () => true,
     hasLoggedInAccount: () => Promise.resolve(true),
+    checkProviderRouting: () => Promise.resolve({ ok: true, detail: 'native' }),
     ...over,
   });
 
@@ -31,5 +32,25 @@ describe('runDoctor', () => {
   it('is green when all deps present, policy exists, and an account is logged in', async () => {
     const report = await runDoctor(deps());
     expect(report.ok).toBe(true);
+    expect(report.rows.find((r) => r.check === 'codex provider routing')?.status).toBe(
+      'ok',
+    );
+  });
+
+  it('flags a dead multi-auth proxy wired into the global config (the footgun)', async () => {
+    const report = await runDoctor(
+      deps({
+        checkProviderRouting: () =>
+          Promise.resolve({
+            ok: false,
+            detail:
+              'nothing listening on :57180 — run: codex-multi-auth rotation disable',
+          }),
+      }),
+    );
+    const routing = report.rows.find((r) => r.check === 'codex provider routing');
+    expect(routing?.status).toBe('misconfigured');
+    expect(routing?.remediation).toContain('rotation disable');
+    expect(report.ok).toBe(false);
   });
 });

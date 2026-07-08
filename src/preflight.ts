@@ -1,6 +1,6 @@
 // src/preflight.ts
 import { isAbsolute } from 'node:path';
-import type { DelegationSpec } from './config/types.js';
+import { AUTH_MODES, SANDBOX_LEVELS, type DelegationSpec } from './config/types.js';
 
 export interface PreflightInput {
   readonly isGitRepo: boolean;
@@ -50,5 +50,34 @@ export function validateDelegationSpec(
     'completionCriterion',
   ] as const) {
     if (!spec[field]) throw new Error(`spec.${field} is required`);
+  }
+  // sandboxLevel is optional (absent = 'default'), but if present it must be a
+  // known level — an unrecognized string must never silently fall through to a
+  // wider-than-intended sandbox.
+  if (spec.sandboxLevel !== undefined && !SANDBOX_LEVELS.includes(spec.sandboxLevel)) {
+    throw new Error(`spec.sandboxLevel must be one of ${SANDBOX_LEVELS.join(', ')}`);
+  }
+  // auth is optional (absent = 'native'); an unknown mode must never route a
+  // delegation through an unintended account path.
+  if (spec.auth !== undefined && !AUTH_MODES.includes(spec.auth)) {
+    throw new Error(`spec.auth must be one of ${AUTH_MODES.join(', ')}`);
+  }
+  // checks are optional gate commands; if present each must be a
+  // [command, [args...]] pair so the verifier can spawn it without a shell.
+  if (spec.checks !== undefined) {
+    if (!Array.isArray(spec.checks))
+      throw new Error('spec.checks must be an array of [command, args[]] pairs');
+    for (const check of spec.checks) {
+      const ok =
+        Array.isArray(check) &&
+        check.length === 2 &&
+        typeof check[0] === 'string' &&
+        Array.isArray(check[1]) &&
+        check[1].every((a) => typeof a === 'string');
+      if (!ok)
+        throw new Error(
+          'each spec.checks entry must be [command: string, args: string[]]',
+        );
+    }
   }
 }

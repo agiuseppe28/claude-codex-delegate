@@ -11,7 +11,13 @@ export interface RunOutcome {
 export type Runner = (
   file: string,
   args: readonly string[],
-  opts?: { readonly cwd?: string; readonly timeoutMs?: number; readonly input?: string },
+  opts?: {
+    readonly cwd?: string;
+    readonly timeoutMs?: number;
+    readonly input?: string;
+    /** Extra env vars merged over the parent process env for this child only. */
+    readonly env?: Readonly<Record<string, string>>;
+  },
 ) => Promise<RunOutcome>;
 
 /**
@@ -41,6 +47,9 @@ export const run: Runner = (file, args, opts = {}) =>
     // prompt survives intact when delivered this way.
     const child = spawn(file, [...args], {
       cwd: opts.cwd,
+      // Only build a merged env when extra vars are given, so the common path
+      // keeps inheriting the parent env untouched (spawn default).
+      env: opts.env ? { ...process.env, ...opts.env } : undefined,
       stdio:
         opts.input !== undefined ? ['pipe', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe'],
     });

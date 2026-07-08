@@ -65,4 +65,39 @@ describe('validateDelegationSpec', () => {
     expect(() => validateDelegationSpec({ ...good, completionCriterion: '' })).toThrow(
       /completionCriterion/,
     ));
+  it('accepts a spec with no sandboxLevel (defaults apply downstream)', () =>
+    expect(() => validateDelegationSpec(good)).not.toThrow());
+  it('accepts each known sandboxLevel', () => {
+    for (const lvl of ['default', 'network', 'full'] as const) {
+      expect(() => validateDelegationSpec({ ...good, sandboxLevel: lvl })).not.toThrow();
+    }
+  });
+  it('rejects an unknown sandboxLevel rather than silently widening', () =>
+    expect(() =>
+      validateDelegationSpec({
+        ...good,
+        sandboxLevel: 'danger-full-access' as never,
+      }),
+    ).toThrow(/sandboxLevel/));
+  it('accepts each known auth mode and rejects an unknown one', () => {
+    for (const auth of ['native', 'rotate'] as const)
+      expect(() => validateDelegationSpec({ ...good, auth })).not.toThrow();
+    expect(() => validateDelegationSpec({ ...good, auth: 'sudo' as never })).toThrow(
+      /auth/,
+    );
+  });
+  it('accepts well-formed checks pairs', () =>
+    expect(() =>
+      validateDelegationSpec({
+        ...good,
+        checks: [
+          ['npm', ['test']],
+          ['bash', ['-c', 'docker compose up -d']],
+        ],
+      }),
+    ).not.toThrow());
+  it('rejects a malformed checks entry (not a [command, args[]] pair)', () =>
+    expect(() =>
+      validateDelegationSpec({ ...good, checks: ['npm test'] as never }),
+    ).toThrow(/checks/));
 });

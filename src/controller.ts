@@ -1,5 +1,10 @@
 // src/controller.ts
-import type { DelegationSpec, ModelPolicy } from './config/types.js';
+import type {
+  AuthMode,
+  DelegationSpec,
+  ModelPolicy,
+  SandboxLevel,
+} from './config/types.js';
 import { resolve } from './config/modelPolicy.js';
 import { buildPrompt } from './promptBuilder.js';
 import { classifyFailure } from './classifyFailure.js';
@@ -52,6 +57,10 @@ export class Controller {
   ): Promise<Outcome> {
     const resolved = resolve(policy, spec.taskClass);
     const prompt = buildPrompt(spec);
+    // Opt-in escalation: an absent field means the historical locked-down
+    // contract. Resolved once so every attempt + ledger row uses one value.
+    const sandboxLevel: SandboxLevel = spec.sandboxLevel ?? 'default';
+    const auth: AuthMode = spec.auth ?? 'native';
     await this.c.snapshot.take(spec.repoPath);
 
     let chainIndex = 0;
@@ -66,6 +75,8 @@ export class Controller {
         model,
         effort: resolved.effort,
         timeoutMs: resolved.timeoutMs,
+        sandboxLevel,
+        auth,
       });
       lastStderr = res.stderr;
 
@@ -81,6 +92,7 @@ export class Controller {
           model,
           taskClass: spec.taskClass,
           rung: 'execute',
+          sandboxLevel,
           exitCode: 0,
           at: this.c.now(),
         });
@@ -95,6 +107,7 @@ export class Controller {
             model,
             taskClass: spec.taskClass,
             rung: 'no_change',
+            sandboxLevel,
             exitCode: 0,
             at: this.c.now(),
           });
@@ -132,6 +145,7 @@ export class Controller {
         model,
         taskClass: spec.taskClass,
         rung: action.type,
+        sandboxLevel,
         exitCode: res.exitCode,
         at: this.c.now(),
       });

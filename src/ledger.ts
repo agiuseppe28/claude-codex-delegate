@@ -1,4 +1,6 @@
 // src/ledger.ts
+import type { SandboxLevel } from './config/types.js';
+
 export interface LedgerEntry {
   readonly taskId: string;
   readonly account: string;
@@ -7,6 +9,7 @@ export interface LedgerEntry {
   readonly rung: string;
   readonly exitCode: number | null;
   readonly at: string; // ISO timestamp, supplied by caller
+  readonly sandboxLevel?: SandboxLevel; // audit: escalation level used, when known
 }
 
 const ALLOWED = new Set<keyof LedgerEntry>([
@@ -17,6 +20,7 @@ const ALLOWED = new Set<keyof LedgerEntry>([
   'rung',
   'exitCode',
   'at',
+  'sandboxLevel',
 ]);
 
 export type AppendLine = (line: string) => void;
