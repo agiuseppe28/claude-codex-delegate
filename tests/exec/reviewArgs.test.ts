@@ -27,11 +27,19 @@ describe('buildReviewArgs', () => {
     expect(a).toContain('--base');
     expect(a).toContain('main');
   });
-  it('ends with the stdin sentinel and never passes -m or danger flags', () => {
+  it('passes NO trailing prompt positional and never -m or danger flags', () => {
     const a = buildReviewArgs({ target: 'HEAD', model: 'm', effort: 'high' });
-    expect(a[a.length - 1]).toBe('-');
+    // `codex review` rejects a positional PROMPT alongside a target, so there is
+    // no trailing `-`.
+    expect(a[a.length - 1]).not.toBe('-');
+    expect(a).not.toContain('-');
     const j = a.join(' ');
     expect(j).not.toContain(' -m ');
     expect(j).not.toContain('danger');
+  });
+  it('pins the native review to a read-only sandbox (contract: writes nothing)', () => {
+    const j = buildReviewArgs({ target: 'HEAD', model: 'm', effort: 'high' }).join(' ');
+    expect(j).toContain('sandbox_mode="read-only"');
+    expect(j).not.toContain('workspace-write');
   });
 });

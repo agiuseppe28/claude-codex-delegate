@@ -132,10 +132,11 @@ export class ReviewController {
     if (spec.reviewType === 'code-review') {
       const args = buildReviewArgs({ target: spec.target, model, effort });
       const rt = resolveCodexRuntime(auth);
+      // No stdin: native `codex review` takes no PROMPT positional (see
+      // reviewArgs), so stdin is left ignored.
       const out = await this.c.runner(rt.bin, args, {
         cwd: spec.repoPath,
         timeoutMs,
-        input: '', // pipe stdin so the `-` sentinel gets an immediate EOF
         ...(rt.env ? { env: rt.env } : {}),
       });
       return {
