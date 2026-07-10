@@ -31,10 +31,11 @@ import type { Outcome } from './controller.js';
 import { runDoctor } from './doctor.js';
 import type { DoctorDeps, DoctorReport, PolicyModelRef } from './doctor.js';
 import { readModelCatalog } from './exec/modelCatalog.js';
+import { proposePolicyDiff } from './refreshModels.js';
 import { evaluatePreflight, validateDelegationSpec } from './preflight.js';
 import { localDir, resolvePolicyPath } from './config/paths.js';
 import { loadModelPolicy } from './config/modelPolicy.js';
-import type { ModelPolicy, DelegationSpec } from './config/types.js';
+import type { ModelPolicy, DelegationSpec, Effort } from './config/types.js';
 import { compileDenyList, isProtected } from './config/protectedPaths.js';
 import type { DenyList } from './config/protectedPaths.js';
 import { parsePorcelain } from './verify/diff.js';
@@ -111,27 +112,10 @@ async function which(bin: string, runner: Runner = defaultRunner): Promise<boole
 async function buildDoctorDeps(repoRoot: string): Promise<DoctorDeps> {
   const codexPresent = await which('codex');
   const multiAuthPresent = await which('codex-multi-auth');
-  // Flatten the active policy's classes + review into (label, slug, effort)
-  // triples once. A broken/unreadable policy yields no refs (the `models` row is
-  // then simply skipped) rather than crashing doctor.
-  let policyRefs: PolicyModelRef[] = [];
-  try {
-    const policy = realLoadPolicy(repoRoot);
-    policyRefs = [
-      ...Object.entries(policy.classes).map(([name, c]) => ({
-        label: `class ${name}`,
-        slug: c.model,
-        effort: c.effort,
-      })),
-      ...Object.entries(policy.review ?? {}).map(([name, c]) => ({
-        label: `review ${name}`,
-        slug: c.model,
-        effort: c.effort,
-      })),
-    ];
-  } catch {
-    policyRefs = [];
-  }
+  // Flatten the active policy into (label, slug, effort) triples once (shared
+  // with refresh-models). A broken/unreadable policy yields no refs, so the
+  // `models` row is simply skipped rather than crashing doctor.
+  const policyRefs = loadPolicyModelRefs(repoRoot);
   return {
     which: (bin: string) => (bin === 'codex' ? codexPresent : multiAuthPresent),
     policyExists: () =>
@@ -171,6 +155,40 @@ async function readCliVersion(): Promise<{
 }
 
 const CODEX_HOME = (): string => process.env.CODEX_HOME ?? join(homedir(), '.codex');
+
+/**
+ * Flatten the active policy into (label, slug, effort) triples — one per model
+ * in every class/review CHAIN (primary + fallbacks). Shared by doctor's `models`
+ * row and `refresh-models`. Fallbacks are included deliberately: `resolve()`
+ * applies a single effort to the whole chain, so a fallback must also support
+ * that effort AND must count as "used" (else refresh-models flags a
+ * fallback-only model as unreferenced). A broken/unreadable policy yields `[]`.
+ */
+function loadPolicyModelRefs(repoRoot: string): PolicyModelRef[] {
+  try {
+    const policy = realLoadPolicy(repoRoot);
+    const refs: PolicyModelRef[] = [];
+    const pushChain = (
+      section: string,
+      name: string,
+      c: {
+        readonly model: string;
+        readonly effort: Effort;
+        readonly fallback: readonly string[];
+      },
+    ): void => {
+      refs.push({ label: `${section} ${name}`, slug: c.model, effort: c.effort });
+      for (const fb of c.fallback)
+        refs.push({ label: `${section} ${name} fallback`, slug: fb, effort: c.effort });
+    };
+    for (const [name, c] of Object.entries(policy.classes)) pushChain('class', name, c);
+    for (const [name, c] of Object.entries(policy.review ?? {}))
+      pushChain('review', name, c);
+    return refs;
+  } catch {
+    return [];
+  }
+}
 
 /** Can we open a TCP connection to host:port within `timeoutMs`? */
 function isPortListening(host: string, port: number, timeoutMs = 800): Promise<boolean> {
@@ -419,20 +437,41 @@ async function handleDelegate(specFile: string): Promise<number> {
 // refresh-models: stub (network call intentionally NOT performed in MVP)
 // ---------------------------------------------------------------------------
 
-function handleRefreshModels(): Promise<number> {
-  if (process.env.OPENAI_API_KEY) {
-    console.log(
-      'refresh-models: OPENAI_API_KEY is set. Querying /v1/models and proposing a ' +
-        'model-policy.toml diff is not yet implemented; set OPENAI_API_KEY and re-run ' +
-        'once this feature ships.',
+async function handleRefreshModels(): Promise<number> {
+  const catalog = await readModelCatalog(defaultRunner);
+  if (catalog.length === 0) {
+    console.error(
+      'refresh-models: could not read the model catalog (`codex debug models` ' +
+        'failed or returned no models). Is the codex CLI installed and logged in?',
     );
-  } else {
-    console.log(
-      'refresh-models: not yet implemented; set OPENAI_API_KEY and re-run once this ' +
-        'feature ships. No network calls are made by this command today.',
-    );
+    return 1;
   }
-  return Promise.resolve(0);
+  const refs = loadPolicyModelRefs(process.cwd());
+  const diff = proposePolicyDiff(refs, catalog);
+  const clean =
+    diff.missing.length === 0 &&
+    diff.badEffort.length === 0 &&
+    diff.newlyAvailable.length === 0;
+  if (clean) {
+    console.log('refresh-models: policy is in sync with the live catalog.');
+    return 0;
+  }
+  if (diff.missing.length > 0) {
+    console.log('MISSING (policy references a slug not in the catalog):');
+    for (const m of diff.missing) console.log(`  - ${m}`);
+  }
+  if (diff.badEffort.length > 0) {
+    console.log('UNSUPPORTED EFFORT (slug exists but not at the configured effort):');
+    for (const b of diff.badEffort) console.log(`  - ${b}`);
+  }
+  if (diff.newlyAvailable.length > 0) {
+    console.log('NEWLY AVAILABLE (visible catalog slugs your policy does not use):');
+    for (const n of diff.newlyAvailable) console.log(`  - ${n}`);
+  }
+  console.log(
+    '\nrefresh-models proposes; it writes nothing. Edit model-policy.toml yourself.',
+  );
+  return 0;
 }
 
 // ---------------------------------------------------------------------------
