@@ -9,11 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Read-only "judge" subsystem.** Three advisory review commands that write
+  nothing: `review` (code-review of a diff/branch/commit, via the native
+  `codex review`, model set with `-c model=`), `audit` (a code area, custom
+  read-only exec), and `plan-review` (critique a plan/spec before executing it).
+  All run under a `read-only` sandbox, bypass the whitelist/clean-tree gate (a
+  review of an in-progress tree is the point), and return findings as raw text
+  for the caller to read and verify. Defaults: code-review→`gpt-5.6-terra`,
+  audit/plan-review→`gpt-5.6-sol` (overridable per spec).
+- **`SKILL.md` rewritten as a capability map** — two modes (execute vs judge), a
+  task→mode→model→effort→cost decision table, the "verify findings before acting"
+  contract, and the ReviewSpec reference.
 - **GPT-5.6 per-class model policy.** `model-policy.toml` now selects both a
   model tier and an effort per task class (`mechanical`→`gpt-5.6-luna`,
   `implementation`→`gpt-5.6-terra`, `hard`→`gpt-5.6-sol`), replacing the
-  single-flagship policy. New optional `[review]` section pre-declares defaults
-  for the upcoming review subcommands (`code-review`/`audit`/`plan-review`).
+  single-flagship policy. A `[review]` section declares the review-command
+  defaults.
+- **`read-only` sandbox level** (`--sandbox read-only`, network off) for the
+  review path — the read complement of the existing write levels.
 - **Effort ladder aligned to the live catalog:** `Effort` gains `max` and
   `ultra` and drops `minimal`. Each model may declare its supported `efforts`;
   the loader then rejects an impossible `(model, effort)` pair at load time.
@@ -47,9 +60,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known limitations
 
-- The read-only review subsystem (`code-review`/`audit`/`plan-review`
-  subcommands, `read-only` sandbox) is designed (Phase B) but not yet
-  implemented; the `[review]` policy section is parsed but not yet consumed.
+- `code-review` reviews a target (diff/branch/commit) with the native review's
+  own generated prompt; custom per-review instructions are not passed (the native
+  `codex review` rejects a prompt positional alongside a target). `focus` applies
+  to `audit`/`plan-review` only.
+- Review `auth: rotate` is untested and out of scope for v1 (reviews default to
+  `native`).
+- A dedicated doctor warning for policies that omit per-model `efforts` is planned
+  but not yet implemented (the live-catalog `models` row is the real guard).
 - The verifier's pluggable project `checks` (tests/lint/build gating) are
   implemented but not enabled by default — the `delegate` command passes an
   empty check list unless a spec supplies `checks`. Claude is expected to run
