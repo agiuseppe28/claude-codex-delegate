@@ -71,3 +71,18 @@ describe('buildCodexArgs full level (danger-full-access)', () => {
     expect(joined).not.toContain('--sandbox workspace-write');
   });
 });
+
+describe('buildCodexArgs read-only level (review path — no writes)', () => {
+  const ro = build('read-only');
+  it('maps to --sandbox read-only', () =>
+    expect(ro.join(' ')).toContain('--sandbox read-only'));
+  it('never widens to workspace-write or danger-full-access', () => {
+    const joined = ro.join(' ');
+    expect(joined).not.toContain('workspace-write');
+    expect(joined).not.toContain('danger-full-access');
+  });
+  it('still pins approval_policy never and reads the prompt from stdin', () => {
+    expect(ro.join(' ')).toContain('approval_policy="never"');
+    expect(ro[ro.length - 1]).toBe('-');
+  });
+});

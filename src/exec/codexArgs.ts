@@ -42,6 +42,10 @@ function sandboxFlags(level: SandboxLevel): string[] {
       // No OS sandbox at all (Docker/pg/turnkey gates). network_access is not
       // a meaningful key under danger-full-access, so it is omitted.
       return ['--sandbox', 'danger-full-access'];
+    case 'read-only':
+      // The review/audit path: reads the tree/diff, writes nothing. No network
+      // needed (the diff and files are local).
+      return ['--sandbox', 'read-only'];
   }
 }
 

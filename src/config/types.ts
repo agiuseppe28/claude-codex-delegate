@@ -15,10 +15,18 @@ export type ModelTier = 'flagship' | 'fast' | 'general';
  *   deny-list and clean-tree preflight still apply; only the OS sandbox is
  *   lifted. Use sparingly and only for tasks that genuinely cannot self-verify
  *   without it.
+ * - `read-only` — no filesystem writes at all, network OFF. The read side of the
+ *   tool: used by the review/audit path, which reads the tree/diff and returns
+ *   findings but must never modify anything.
  */
-export type SandboxLevel = 'default' | 'network' | 'full';
+export type SandboxLevel = 'default' | 'network' | 'full' | 'read-only';
 
-export const SANDBOX_LEVELS: readonly SandboxLevel[] = ['default', 'network', 'full'];
+export const SANDBOX_LEVELS: readonly SandboxLevel[] = [
+  'default',
+  'network',
+  'full',
+  'read-only',
+];
 
 /**
  * Which Codex account path a delegation runs on. Opt-in and scoped to the
