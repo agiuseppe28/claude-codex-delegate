@@ -41,6 +41,7 @@ export type CheckCommand = readonly [string, readonly string[]];
 
 export interface ModelEntry {
   readonly tier: ModelTier;
+  readonly efforts?: readonly Effort[]; // catalog reasoning levels; absent = unvalidated
 }
 
 export interface TaskClassConfig {
@@ -50,6 +51,14 @@ export interface TaskClassConfig {
   readonly timeout: string; // e.g. "30m"
 }
 
+/** Same shape as TaskClassConfig; used for the [review] section. */
+export interface ReviewClassConfig {
+  readonly model: string;
+  readonly effort: Effort;
+  readonly fallback: readonly string[];
+  readonly timeout: string;
+}
+
 export interface PolicyLimits {
   readonly maxAttemptsPerTask: number;
 }
@@ -57,6 +66,7 @@ export interface PolicyLimits {
 export interface ModelPolicy {
   readonly models: Readonly<Record<string, ModelEntry>>;
   readonly classes: Readonly<Record<string, TaskClassConfig>>;
+  readonly review?: Readonly<Record<string, ReviewClassConfig>>;
   readonly default: { readonly class: string };
   readonly limits: PolicyLimits;
 }

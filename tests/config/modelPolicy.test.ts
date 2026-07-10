@@ -57,3 +57,47 @@ describe('resolve', () => {
     expect(r.chain[0]).toBe('flagship-x'); // implementation.model
   });
 });
+
+describe('(model,effort) catalog validation', () => {
+  it('throws when a class effort is not in the model efforts', () => {
+    // `tier = "flagship"` is unique to flagship-x (single-line match is robust to
+    // the fixture's CRLF endings, unlike a multi-line `[models...]\ntier` pattern).
+    const bad = toml
+      .replace('tier = "flagship"', 'tier = "flagship"\nefforts = ["low", "medium"]')
+      .replace('effort = "medium"', 'effort = "high"'); // implementation uses flagship-x
+    expect(() => loadModelPolicy(bad)).toThrow(
+      /effort "high".*not supported.*flagship-x/,
+    );
+  });
+
+  it('skips validation when the model declares no efforts (back-compat)', () => {
+    expect(() => loadModelPolicy(toml)).not.toThrow();
+  });
+
+  it('validates a [review] section like a class', () => {
+    const withReview =
+      toml +
+      `
+[review.code-review]
+model = "flagship-x"
+effort = "high"
+fallback = ["general-x"]
+timeout = "10m"
+`;
+    const p = loadModelPolicy(withReview);
+    expect(p.review?.['code-review']?.model).toBe('flagship-x');
+  });
+
+  it('rejects a [review] type referencing an unknown model', () => {
+    const withReview =
+      toml +
+      `
+[review.audit]
+model = "ghost"
+effort = "high"
+fallback = []
+timeout = "10m"
+`;
+    expect(() => loadModelPolicy(withReview)).toThrow(/unknown model "ghost"/);
+  });
+});
