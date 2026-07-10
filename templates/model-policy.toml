@@ -4,42 +4,74 @@
 # edit the copy — the shipped template is the fallback used when no local
 # override exists.
 #
-# Flagship-first policy: ONE model, effort is the lever (low/medium/high).
-# Update the flagship id below when OpenAI ships a newer flagship. Avoid `-pro`
-# variants (cost) and older/smaller models (no real advantage; many support only
-# `medium` effort anyway). A different model appears only as a rare fallback.
-# Future: the 5.6 "sol/terra/luna" line will need a different strategy — revisit
-# when it is public.
+# Per-class policy (GPT-5.6 line): the task class selects BOTH a model tier and
+# an effort. sol = frontier, terra = workhorse, luna = small/cheap. Verify every
+# slug with `codex debug models` (doctor's `models` row enforces this at runtime,
+# and `codex-delegate refresh-models` proposes updates from the live catalog).
 #
-# IMPORTANT — every id here must be one the active Codex account can actually
-# run. On a ChatGPT-auth account, `codex exec -m <id>` rejects unavailable ids
-# with "model is not supported when using Codex with a ChatGPT account"; the
-# fallback ladder then burns all its attempts on that error and hands back with
-# no work done. The `-codex` suffixed ids (e.g. gpt-5.3-codex) are NOT offered
-# to ChatGPT accounts — use the plain flagship (gpt-5.5) and a supported sibling
-# (gpt-5.4) instead. Check `codex exec -m <id>` once before adding a new id.
-[models."gpt-5.5"]
+# `efforts` lists each model's catalog reasoning levels so the loader can reject
+# an impossible (model, effort) pair at LOAD time instead of burning the fallback
+# ladder mid-run. Design rule: never minimize BOTH the model size and the effort
+# on the same class — a small model at minimal effort is where reliability quietly
+# drops on exactly the work you wanted cheap-but-correct.
+#
+# Requires Codex CLI >= 0.144.1 (older CLIs do not expose the 5.6 line and will
+# make doctor's `cli-version` row warn). The 5.6 slugs were confirmed runnable on
+# a ChatGPT-auth account on 2026-07-10.
+[models."gpt-5.6-sol"]
 tier = "flagship"
-[models."gpt-5.4"]   # rare fallback only: used if the flagship is unavailable
+efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
+[models."gpt-5.6-terra"]
 tier = "general"
+efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
+[models."gpt-5.6-luna"]
+tier = "fast"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+[models."gpt-5.5"]
+tier = "general"     # availability fallback only
+efforts = ["low", "medium", "high", "xhigh"]
+[models."gpt-5.4"]
+tier = "general"     # availability fallback only
+efforts = ["low", "medium", "high", "xhigh"]
+[models."gpt-5.4-mini"]
+tier = "fast"        # availability fallback only
+efforts = ["low", "medium", "high", "xhigh"]
 
-[classes.mechanical]     # simple, mechanical edits — low effort (fast, cheap)
-model = "gpt-5.5"
-effort = "low"
-fallback = ["gpt-5.4"]
+[classes.mechanical]     # simple, mechanical edits — small model, NOT minimal effort
+model = "gpt-5.6-luna"
+effort = "medium"
+fallback = ["gpt-5.4-mini", "gpt-5.4"]
 timeout = "10m"
 
-[classes.implementation] # features / guided refactors — medium effort
-model = "gpt-5.5"
+[classes.implementation] # features / guided refactors — the workhorse (default)
+model = "gpt-5.6-terra"
 effort = "medium"
-fallback = ["gpt-5.4"]
+fallback = ["gpt-5.5", "gpt-5.4"]
 timeout = "30m"
 
-[classes.hard]           # tough bugs / heavy reasoning — high effort
-model = "gpt-5.5"
+[classes.hard]           # tough bugs / heavy reasoning — frontier model
+model = "gpt-5.6-sol"
 effort = "high"
-fallback = ["gpt-5.4"]
+fallback = ["gpt-5.6-terra", "gpt-5.5"]
 timeout = "45m"
+
+[review.code-review]     # routine diffs: terra (cost-aware); raise to sol when critical
+model = "gpt-5.6-terra"
+effort = "high"
+fallback = ["gpt-5.5"]
+timeout = "20m"
+
+[review.audit]           # whole-area security / quality sweep
+model = "gpt-5.6-sol"
+effort = "xhigh"
+fallback = ["gpt-5.6-terra"]
+timeout = "30m"
+
+[review.plan-review]     # second-opinion a plan/spec BEFORE executing it
+model = "gpt-5.6-sol"
+effort = "high"
+fallback = ["gpt-5.6-terra"]
+timeout = "20m"
 
 [default]
 class = "implementation"

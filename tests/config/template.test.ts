@@ -23,16 +23,21 @@ describe('shipped templates/model-policy.toml', () => {
     expect(() => loadModelPolicy(policyToml)).not.toThrow();
   });
 
-  it('resolves the mechanical class to low effort on the flagship', () => {
+  it('resolves the mechanical class to the small model at medium effort', () => {
     const policy = loadModelPolicy(policyToml);
     const resolved = resolve(policy, 'mechanical');
-    expect(resolved.effort).toBe('low');
-    expect(resolved.chain[0]).toBe('gpt-5.5');
+    expect(resolved.effort).toBe('medium');
+    expect(resolved.chain[0]).toBe('gpt-5.6-luna');
   });
 
-  it('declares the flagship model with the expected tier', () => {
+  it('declares the frontier model with the flagship tier', () => {
     const policy = loadModelPolicy(policyToml);
-    expect(policy.models['gpt-5.5']?.tier).toBe('flagship');
+    expect(policy.models['gpt-5.6-sol']?.tier).toBe('flagship');
+  });
+
+  it('parses the [review] section (audit routed to the frontier model)', () => {
+    const policy = loadModelPolicy(policyToml);
+    expect(policy.review?.['audit']?.model).toBe('gpt-5.6-sol');
   });
 
   it('ships no `-codex` model id (unavailable on ChatGPT-auth accounts)', () => {
