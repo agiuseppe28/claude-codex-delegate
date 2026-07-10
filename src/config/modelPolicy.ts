@@ -2,7 +2,7 @@ import { parse } from 'smol-toml';
 import { parseDurationMs } from './duration.js';
 import type { Effort, ModelPolicy, ResolvedModel, TaskClassConfig } from './types.js';
 
-const EFFORTS = new Set<Effort>(['minimal', 'low', 'medium', 'high', 'xhigh']);
+const EFFORTS = new Set<Effort>(['low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
 
 export function loadModelPolicy(toml: string): ModelPolicy {
   const raw = parse(toml) as unknown as Partial<ModelPolicy>;

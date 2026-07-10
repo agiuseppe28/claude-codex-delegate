@@ -1,4 +1,4 @@
-export type Effort = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra';
 export type ModelTier = 'flagship' | 'fast' | 'general';
 
 /**
