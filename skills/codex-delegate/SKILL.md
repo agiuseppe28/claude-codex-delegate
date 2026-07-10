@@ -1,181 +1,207 @@
 ---
 name: codex-delegate
-description: Delegate a mechanical execution task to Codex under a deterministic hygiene contract (bounded whitelist, protected-path deny-list, fallback ladder with multi-account switching). Use when a task is well-specified, mechanical-to-implementation-level work (renames, apply-diff, scaffolding, guided refactors, writing tests to a known target) that does not require interactive judgment, and you want to hand it off to Codex instead of doing it yourself.
+description: Delegate work to the Codex CLI under a deterministic hygiene contract. Two modes — EXECUTE (write code under a bounded whitelist, protected-path deny-list, clean-tree precondition, and a fallback ladder) and JUDGE (read-only code-review / audit / plan-review that returns advisory findings from a strong model). Use when a task is well-specified enough to hand off: mechanical-to-implementation execution (renames, apply-diff, scaffolding, guided refactors, tests to a known target), OR a second opinion on a diff, a code area, or a written plan.
 ---
 
 # codex-delegate
 
-This skill hands a self-contained unit of work to the Codex CLI, which executes
-it under a hard, tool-enforced safety contract: a non-empty whitelist of files
-it may touch, a protected-path deny-list it can never touch even if asked, a
-clean-git-tree precondition, and an automatic fallback ladder (retry, model
-downgrade, account switch) that hands control back to Claude the moment the
-ladder is exhausted. Safety lives in the tool, not in the prompt — Claude's job
-is judgment: deciding what to delegate and writing an accurate spec.
+This skill hands work to the Codex CLI (GPT-5.6 line) under a hard, tool-enforced
+contract. There are **two modes**, and the first thing to decide is which one you
+are in:
 
-## Workflow
+- **EXECUTE** — Codex _writes code_. It runs under a non-empty whitelist of files
+  it may touch, a protected-path deny-list it can never touch, a clean-git-tree
+  precondition, and an automatic fallback ladder (retry → model downgrade →
+  account switch) that hands control back the moment it is exhausted. Command:
+  `delegate`.
+- **JUDGE** — Codex _reviews, writes nothing_. Read-only. Returns **advisory
+  findings** you then read and verify. No whitelist, no clean-tree gate (reviewing
+  an in-progress tree is the point). Commands: `review`, `audit`, `plan-review`.
 
-### 1. Run doctor first
+Safety lives in the tool, not the prompt. Your job is judgment: which mode, what
+to hand off, and — for a review — critically evaluating what comes back.
+
+## The capability map (read this at planning time)
+
+When a plan says "delegate to Codex here," you should already know: execute or
+judge? which model? which effort? and what you will do with the result.
+
+| I want to…                        | mode    | command                     | model           | effort |
+| --------------------------------- | ------- | --------------------------- | --------------- | ------ |
+| rename / apply-diff / boilerplate | execute | `delegate` (mechanical)     | `gpt-5.6-luna`  | medium |
+| build a feature / guided refactor | execute | `delegate` (implementation) | `gpt-5.6-terra` | medium |
+| crack a hard, specifiable bug     | execute | `delegate` (hard)           | `gpt-5.6-sol`   | high   |
+| sanity-check a routine diff       | judge   | `review`                    | `gpt-5.6-terra` | high   |
+| review a critical / security diff | judge   | `review` (override model)   | `gpt-5.6-sol`   | high   |
+| audit a code area for issues      | judge   | `audit`                     | `gpt-5.6-sol`   | xhigh  |
+| second-opinion a plan before work | judge   | `plan-review`               | `gpt-5.6-sol`   | high   |
+
+These are the **policy defaults** in `model-policy.toml` — the task class (or
+review type) picks the model, effort, and timeout for you. You may override the
+model/effort on a spec when a specific job justifies it (up or down), but the
+defaults are tuned; reach for an override deliberately, not by habit.
+
+### The Sol clause (why this matters now)
+
+`gpt-5.6-sol` is a frontier model that **can exceed your own precision on
+judgment tasks**. Treat a review from it (or terra) as a genuine second opinion,
+not noise — but the loop is **verify, then act**:
+
+1. Read the findings.
+2. **Verify the highest-severity ones against the actual code / plan** — open the
+   cited file:line, confirm the claim.
+3. Then decide. Never apply a finding blindly; never dismiss one blindly.
+
+You remain accountable for what lands. (This is not theoretical: during this
+tool's own development, a `code-review` on gpt-5.6-terra caught two real P1s — a
+broken CLI path and a read-only-contract violation — that had passed unit tests.)
+
+### Cost discipline (autonomous — no hard gate)
+
+`sol` is the most expensive model. Spend it where correctness pays for it: `hard`
+execution, `audit`/`plan-review`, and critical `code-review`. Routine diffs go to
+`terra`. Don't burn `sol` on a trivial rename or a one-line diff — that is the
+whole reason the classes/review-types default the way they do.
+
+## Step 0 — always run doctor first
 
 ```
 codex-delegate doctor
 ```
 
-If any row is `MISSING` or `WARN` (red), **stop** and report the exact
-remediation command printed for each failing row (e.g. `npm i -g @openai/codex`
-or `codex-multi-auth login`). Do not attempt to delegate against a broken
-setup — the CLI will simply fail preflight or crash mid-run.
+Every row must be `OK`. Rows that matter for 5.6:
 
-### 2. Classify the task
+- **`models`** — every model your policy references (primary + fallbacks) exists
+  in the live `codex debug models` catalog and supports the configured effort.
+  `MISSING` here means a delegation would burn its whole ladder on "model not
+  supported"; fix the policy or run `codex update` before delegating.
+- **`cli-version`** — a stale CLI silently hides newer models. If it `WARN`s, run
+  `codex update` (the 5.6 line needs CLI ≥ 0.144.1).
 
-The policy is flagship-first: one flagship model handles every class, and
-classifying the task only picks how much **effort** it runs at (low/medium/
-high). You are not choosing a model — you are choosing an effort level. Do
-NOT pick a different, cheaper model for "easy" tasks; that's not the policy
-and there is no real advantage to it. A different model only ever appears as
-an automatic, rare fallback inside the ladder when the flagship itself is
-unavailable — never as a manual choice you make here.
+`codex-delegate refresh-models` prints a proposed policy diff from the live
+catalog (missing slugs, unsupported efforts, newly available models) — run it
+after an OpenAI model change.
 
-Pick exactly one task class from `model-policy.toml`:
+---
 
-- **`mechanical`** — rename a symbol, apply a known diff, move a file, fix a
-  lint error, add a documented boilerplate block. No design judgment needed.
-  → low effort.
-- **`implementation`** — build a feature, write tests against a spec, do a
-  guided refactor. Some judgment, but the target is well-defined. → medium
-  effort.
-- **`hard`** — a tough, ambiguous bug or heavy-reasoning task. Only delegate
-  this class when the task is still fully specifiable in writing; if it needs
-  back-and-forth exploration, do NOT delegate (see "When NOT to delegate"). →
-  high effort.
+## EXECUTE mode — `delegate`
 
-The class picks the model, effort, and timeout from `model-policy.toml` — you
-never specify those directly.
+### 1. Classify the task → pick a class
 
-### 3. Write the DelegationSpec
+- **`mechanical`** — rename a symbol, apply a known diff, move a file, fix a lint
+  error, add a documented boilerplate block. No design judgment. (luna, medium)
+- **`implementation`** — build a feature, write tests against a spec, do a guided
+  refactor. Some judgment, well-defined target. (terra, medium) — the default.
+- **`hard`** — a tough, ambiguous bug or heavy-reasoning task, but still fully
+  specifiable in writing. If it needs back-and-forth exploration, do NOT delegate.
+  (sol, high)
 
-Every field below is **required** except `verbatimFiles`; the CLI's
-`validateDelegationSpec` rejects a spec missing any of them, and an empty
-`whitelist` is rejected unconditionally (it is the primary safety guard).
+The class picks model + effort + timeout. You are not choosing a model by hand
+(except the rare, deliberate override).
 
-| Field                      | Meaning                                                                                                                                                                                                                                                                                                   |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `taskId`                   | Short stable identifier, e.g. `"CCD-42"`.                                                                                                                                                                                                                                                                 |
-| `repoPath`                 | **Absolute** path to the target repo.                                                                                                                                                                                                                                                                     |
-| `branch`                   | Branch name the work belongs to (informational; does not create or check out a branch).                                                                                                                                                                                                                   |
-| `taskClass`                | One of the classes from step 2.                                                                                                                                                                                                                                                                           |
-| `instructions`             | What Codex must do — precise, unambiguous, self-contained.                                                                                                                                                                                                                                                |
-| `whitelist`                | **Non-empty** array of repo-relative paths Codex may create or modify. Nothing outside this list will survive verification — stray changes are auto-reverted.                                                                                                                                             |
-| `completionCriterion`      | A verifiable statement of "done" (a command that passes, a string that appears/disappears).                                                                                                                                                                                                               |
-| `verbatimFiles` (optional) | Map of path → exact file content Codex must write byte-for-byte, when you already know the precise content and don't want it improvised.                                                                                                                                                                  |
-| `sandboxLevel` (optional)  | Sandbox escalation. Omit (or `"default"`) for the locked-down norm. `"network"` = workspace-write with network ON. `"full"` = `danger-full-access`. See step 6 before escalating.                                                                                                                         |
-| `auth` (optional)          | Account path for this run. Omit (or `"native"`) to use the user's own logged-in Codex account. `"rotate"` runs through the multi-account wrapper scoped to this delegation only — never touches the global Codex config. Use when a long/expensive run risks exhausting one account's rate window.        |
-| `checks` (optional)        | Array of `[command, [args...]]` gate pairs run **after** Codex exits (in `repoPath`, on the host). Any non-zero exit turns the outcome into `hand_back`. This is how you make `done` actually mean "the gate passed" — e.g. `[["npm", ["test"]], ["bash", ["-c", "docker compose up -d && ./gate.sh"]]]`. |
+### 2. Write the DelegationSpec (JSON file)
 
-Write the spec to a JSON file (e.g. in a temp/scratch location) and pass its
-path to the CLI. Example:
+| Field                 | Meaning                                                                                              |
+| --------------------- | ---------------------------------------------------------------------------------------------------- |
+| `taskId`              | Short stable id, e.g. `"CCD-42"`.                                                                    |
+| `repoPath`            | **Absolute** path to the target repo.                                                                |
+| `branch`              | Branch the work belongs to (informational).                                                          |
+| `taskClass`           | One of the classes above.                                                                            |
+| `instructions`        | Precise, unambiguous, self-contained.                                                                |
+| `whitelist`           | **Non-empty** array of repo-relative paths Codex may create/modify. Stray changes are auto-reverted. |
+| `completionCriterion` | A verifiable "done".                                                                                 |
+| `verbatimFiles?`      | Map path → exact content Codex must write byte-for-byte.                                             |
+| `sandboxLevel?`       | `default` (locked) · `network` · `full`. See below. Omit for the norm.                               |
+| `auth?`               | `native` (default) · `rotate` (per-run multi-account).                                               |
+| `checks?`             | `[[cmd,[args]]]` gates run **on the host** after Codex exits. Any non-zero → `hand_back`.            |
+
+**Encode the real gate as `checks`** (e.g. `[["npm",["run","check"]]]`) — then
+`done` means the gate passed, not just that Codex exited. With no `checks`, `done`
+only attests the whitelist/protected-path guards and you must verify yourself.
+
+```
+codex-delegate delegate <spec.json>
+```
+
+Reads one JSON outcome on stdout: `{"status":"done","report":"..."}` (verified) or
+`{"status":"hand_back",...}` (ladder exhausted — pick it up yourself or report the
+exact state; never silently re-run the same call).
+
+### Sandbox levels (execute)
+
+Mapping lives in one place (`src/exec/codexArgs.ts`); the deny-list and clean-tree
+preflight apply at **every** level. `default` = workspace-write + network off (the
+norm). `network` = workspace-write + network on (installs). `full` =
+danger-full-access (Docker/pg/turnkey gates). Escalate only when the task cannot
+self-verify without it; prefer the narrowest that works. Every non-default run
+prints a loud `ELEVATED SANDBOX` line and is recorded in the ledger.
+
+---
+
+## JUDGE mode — `review` / `audit` / `plan-review`
+
+Read-only. Returns advisory findings as text. **No whitelist, no clean-tree
+gate.** The subcommand _is_ the review type; the read-only sandbox is enforced on
+both engines (native `codex review` for `review`, `codex exec --sandbox read-only`
+for `audit`/`plan-review`).
+
+### The ReviewSpec (JSON file)
+
+| Field      | Meaning                                                                               |
+| ---------- | ------------------------------------------------------------------------------------- |
+| `reviewId` | Short stable id, e.g. `"CR-42"`.                                                      |
+| `repoPath` | **Absolute** path.                                                                    |
+| `target`   | Per type — see below. (`reviewType` is set by the subcommand; you don't put it here.) |
+| `focus?`   | e.g. `"security"` for an audit.                                                       |
+| `model?`   | Override the policy default (e.g. raise a code-review to `gpt-5.6-sol`).              |
+| `effort?`  | Override the policy default effort.                                                   |
+
+`target` semantics:
+
+- **`review`** (code-review) → a git ref: `"HEAD"`, a branch (`"main"` → reviews
+  vs that base), a commit sha, or `"uncommitted"`. Requires a git repo.
+- **`audit`** → a repo-relative path/area, e.g. `"src/exec/"` (+ optional `focus`).
+- **`plan-review`** → a repo-relative path to the plan/spec file to critique.
+
+```
+codex-delegate review <spec.json>        # code-review a diff
+codex-delegate audit <spec.json>         # audit an area
+codex-delegate plan-review <spec.json>   # critique a plan before executing it
+```
+
+Example (raise a critical diff to sol):
 
 ```json
 {
-  "taskId": "CCD-42",
-  "repoPath": "C:/abs/path/to/repo",
-  "branch": "feat/rename-foo",
-  "taskClass": "mechanical",
-  "instructions": "Rename the symbol foo to bar in the two listed files.",
-  "whitelist": ["src/a.ts", "src/b.ts"],
-  "completionCriterion": "npm test passes and grep finds no \"foo\"."
+  "reviewId": "CR-9",
+  "repoPath": "C:/abs/repo",
+  "target": "uncommitted",
+  "model": "gpt-5.6-sol"
 }
 ```
 
-### 4. Run the delegate command
+### Reading the outcome (advisory)
 
-```
-codex-delegate delegate <path-to-spec.json>
-```
+`{"status":"done","findings":"...","model":"...","effort":"..."}` — `findings` is
+raw review text. Apply the **Sol clause**: read, verify the top findings against
+the code/plan, then decide. `hand_back` means the ladder was exhausted (or the
+review type isn't configured in `[review]`) — read `lastError`.
 
-The CLI validates the spec, runs preflight (git-repo check, clean-tree check,
-protected-path check), and — only if preflight proceeds — runs the fallback
-ladder to completion. If preflight aborts (not a git repo, or a protected path
-is in the whitelist) or asks (the tree is dirty), the CLI exits non-zero
-**without** running Codex; read the printed reason, fix the underlying
-condition (commit/stash the tree, remove the protected path), and retry.
+**The highest-leverage judge move is `plan-review` before you execute a plan** —
+it catches the expensive mistakes while they are still cheap to fix.
 
-### 5. Read the JSON outcome
+---
 
-The command prints one JSON object to stdout on completion:
+## When NOT to delegate (either mode)
 
-- **`{"status":"done","report":"..."}`** — Codex finished and the tool's
-  automatic verification passed: no file outside the `whitelist` was left
-  changed (stray changes are auto-reverted), no protected path was touched,
-  **and every command in `checks` (if you supplied any) exited 0**. So the
-  strength of `done` is exactly as strong as the `checks` you provided. If you
-  passed the real gate as `checks` (tests, lint, the turnkey/Docker gate — now
-  runnable thanks to `sandboxLevel`), `done` means the gate is green and you
-  can report it closed. If you supplied **no** `checks`, `done` only attests
-  the whitelist/protected-path guards — you must still run the project's own
-  tests/build and confirm the `completionCriterion` yourself before closing.
-  Prefer encoding the completion criterion as `checks` so the tool enforces it
-  instead of you doing it by hand.
-- **`{"status":"hand_back",...}`** — the fallback ladder was exhausted
-  (rate limits, repeated crashes, no models left) without a clean, verified
-  result. Do not leave this hanging: either pick up the task yourself and
-  finish it, or stop and report the exact state (what was attempted, what
-  failed, what's left) so the user can decide. Never silently retry the same
-  delegate call in a loop.
-
-### 6. Sandbox level — default locked, escalation is opt-in
-
-The mapping from level to concrete flags is hard-coded in one place
-(`src/exec/codexArgs.ts`), and the protected-path deny-list
-(`src/config/protectedPaths.ts`) and clean-tree preflight apply at **every**
-level — those are never negotiable and never touched to "unblock" a run.
-`approval_policy="never"` is also invariant (the CLI is always
-non-interactive).
-
-What _is_ selectable, via the optional `sandboxLevel` spec field, is how wide
-the OS sandbox is:
-
-- **`default`** (omit the field) — `workspace-write`, network OFF. This is the
-  norm; use it unless you have a concrete reason not to.
-- **`network`** — `workspace-write` but network ON. For tasks that must reach
-  the network (install a dependency, pull a package/image) while all writes
-  stay confined to the workspace.
-- **`full`** — `danger-full-access`: no OS filesystem sandbox and network ON.
-  Only for tasks that genuinely cannot self-verify otherwise — driving Docker,
-  a local postgres, or a full turnkey gate. The deny-list still blocks
-  protected paths and the tree must still be clean.
-
-Rules for escalating:
-
-- **Escalate only when the task cannot be verified without it.** If Codex can
-  self-check the pure half of a task with plain unit tests, keep it at
-  `default` and gate the rest yourself. Prefer the narrowest level that works
-  (`network` before `full`).
-- Escalation is a deliberate choice recorded in the audit trail: every ledger
-  row carries the `sandboxLevel`, and the CLI prints a loud `ELEVATED SANDBOX`
-  line on stderr for any non-default run.
-- An unrecognized `sandboxLevel` is rejected by `validateDelegationSpec` — the
-  tool never silently widens.
-- A wider sandbox does not lower the bar for a good delegation candidate: the
-  task must still be fully specifiable, with a closed whitelist and a
-  verifiable completion criterion. If it needs interactive judgment, don't
-  delegate it regardless of sandbox level.
-
-The `instructions` text is delivered to Codex via stdin (`codex exec -`), not
-as a CLI argument — this keeps multiline prompts intact across platforms and
-means the prompt never touches argv or a shell. You don't need to do anything
-differently because of this; it only matters if you're reading the executor
-code.
-
-## When NOT to delegate
-
-- The task requires interactive judgment, back-and-forth exploration, or
-  answering follow-up questions mid-task — Codex runs non-interactively and
-  cannot be steered once started.
-- The task is inherently ambiguous or under-specified — write a spec you
-  cannot make unambiguous, don't delegate it; do the work directly instead.
-- The task needs to touch files you can't enumerate up front — the whitelist
-  must be a concrete, closed list of repo-relative paths.
-- The target directory is not a git repository, or has uncommitted changes
-  you don't want auto-reverted if Codex strays outside the whitelist.
-- The task is trivial enough that writing the spec costs more than doing it.
+- The task needs interactive judgment or back-and-forth — Codex runs
+  non-interactively and cannot be steered once started.
+- It is inherently ambiguous / under-specified — write a spec you cannot make
+  unambiguous, don't delegate it.
+- (execute) It touches files you can't enumerate up front — the whitelist must be
+  a closed list.
+- (execute) The target isn't a git repo, or has uncommitted changes you don't want
+  auto-reverted on a stray edit.
+- (judge) You won't actually read and verify the findings — don't spend a review
+  (especially a sol one) you'll rubber-stamp or ignore.
+- It's trivial enough that writing the spec costs more than doing it yourself.
