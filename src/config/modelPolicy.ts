@@ -78,3 +78,21 @@ export function resolve(policy: ModelPolicy, taskClass: string): ResolvedModel {
     timeoutMs: parseDurationMs(cfg.timeout),
   };
 }
+
+/**
+ * Resolve a `[review]` type into an ordered execution plan, or `null` when the
+ * type is not configured (the caller then hands back). Mirrors `resolve` but for
+ * the review section, which is optional.
+ */
+export function resolveReview(
+  policy: ModelPolicy,
+  reviewType: string,
+): ResolvedModel | null {
+  const cfg = policy.review?.[reviewType];
+  if (!cfg) return null;
+  return {
+    chain: [cfg.model, ...cfg.fallback],
+    effort: cfg.effort,
+    timeoutMs: parseDurationMs(cfg.timeout),
+  };
+}

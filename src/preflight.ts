@@ -1,6 +1,12 @@
 // src/preflight.ts
 import { isAbsolute } from 'node:path';
-import { AUTH_MODES, SANDBOX_LEVELS, type DelegationSpec } from './config/types.js';
+import {
+  AUTH_MODES,
+  REVIEW_TYPES,
+  SANDBOX_LEVELS,
+  type DelegationSpec,
+  type ReviewSpec,
+} from './config/types.js';
 
 export interface PreflightInput {
   readonly isGitRepo: boolean;
@@ -80,4 +86,22 @@ export function validateDelegationSpec(
         );
     }
   }
+}
+
+/**
+ * Shape-validate a ReviewSpec. Deliberately has NO whitelist check: a review
+ * writes nothing (it runs read-only / via native `codex review`), so the
+ * primary write-guard of `validateDelegationSpec` does not apply here.
+ */
+export function validateReviewSpec(
+  spec: Partial<ReviewSpec>,
+): asserts spec is ReviewSpec {
+  if (!spec.repoPath || !isAbsolute(spec.repoPath))
+    throw new Error('spec.repoPath must be an absolute path');
+  if (!spec.reviewId) throw new Error('spec.reviewId is required');
+  if (!spec.reviewType || !REVIEW_TYPES.includes(spec.reviewType))
+    throw new Error(`spec.reviewType must be one of ${REVIEW_TYPES.join(', ')}`);
+  if (!spec.target) throw new Error('spec.target is required');
+  if (spec.auth !== undefined && !AUTH_MODES.includes(spec.auth))
+    throw new Error(`spec.auth must be one of ${AUTH_MODES.join(', ')}`);
 }

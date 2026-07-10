@@ -100,3 +100,34 @@ export interface DelegationSpec {
   readonly auth?: AuthMode; // opt-in per-delegation rotation; absent = 'native'
   readonly checks?: readonly CheckCommand[]; // gate commands run after Codex exits
 }
+
+/** The read-only "judge" capabilities Codex runs as an advisory second opinion. */
+export type ReviewType = 'code-review' | 'audit' | 'plan-review';
+
+export const REVIEW_TYPES: readonly ReviewType[] = [
+  'code-review',
+  'audit',
+  'plan-review',
+];
+
+/**
+ * The self-contained review task Claude hands to the judge path. Unlike a
+ * DelegationSpec there is NO whitelist — a review writes nothing, so the primary
+ * write-guard does not apply (it runs under the `read-only` sandbox / native
+ * `codex review`).
+ */
+export interface ReviewSpec {
+  readonly reviewId: string;
+  readonly repoPath: string; // absolute
+  readonly reviewType: ReviewType;
+  /**
+   * - `code-review`: a git ref/branch, a 7-40 hex sha, or `uncommitted` | `HEAD`.
+   * - `audit`: a repo-relative path/area to examine.
+   * - `plan-review`: a repo-relative path to the plan/spec file to review.
+   */
+  readonly target: string;
+  readonly focus?: string; // e.g. "security" for audit
+  readonly model?: string; // override; else [review].<type>.model
+  readonly effort?: Effort; // override; else [review].<type>.effort
+  readonly auth?: AuthMode; // absent = 'native' (rotate is out of scope for reviews in v1)
+}

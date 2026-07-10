@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { loadModelPolicy, resolve } from '../../src/config/modelPolicy.js';
+import { loadModelPolicy, resolve, resolveReview } from '../../src/config/modelPolicy.js';
 
 const toml = readFileSync(
   fileURLToPath(new URL('./fixtures/policy.toml', import.meta.url)),
@@ -99,5 +99,26 @@ fallback = []
 timeout = "10m"
 `;
     expect(() => loadModelPolicy(withReview)).toThrow(/unknown model "ghost"/);
+  });
+});
+
+describe('resolveReview', () => {
+  const withReview =
+    toml +
+    `
+[review.audit]
+model = "flagship-x"
+effort = "high"
+fallback = ["general-x"]
+timeout = "30m"
+`;
+  it('resolves a review type to a chain + effort + timeout', () => {
+    const r = resolveReview(loadModelPolicy(withReview), 'audit');
+    expect(r?.chain).toEqual(['flagship-x', 'general-x']);
+    expect(r?.effort).toBe('high');
+    expect(r?.timeoutMs).toBe(1_800_000);
+  });
+  it('returns null when the review type is not configured', () => {
+    expect(resolveReview(loadModelPolicy(toml), 'audit')).toBeNull();
   });
 });

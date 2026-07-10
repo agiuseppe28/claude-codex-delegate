@@ -1,6 +1,11 @@
 // tests/preflight.test.ts
 import { describe, it, expect } from 'vitest';
-import { evaluatePreflight, validateDelegationSpec } from '../src/preflight.js';
+import {
+  evaluatePreflight,
+  validateDelegationSpec,
+  validateReviewSpec,
+} from '../src/preflight.js';
+import type { ReviewSpec } from '../src/config/types.js';
 
 describe('evaluatePreflight', () => {
   it('aborts when a whitelist entry is protected', () => {
@@ -100,4 +105,27 @@ describe('validateDelegationSpec', () => {
     expect(() =>
       validateDelegationSpec({ ...good, checks: ['npm test'] as never }),
     ).toThrow(/checks/));
+});
+
+describe('validateReviewSpec', () => {
+  const ok: Partial<ReviewSpec> = {
+    reviewId: 'R1',
+    repoPath: '/abs/repo',
+    reviewType: 'audit',
+    target: 'src/',
+  };
+  it('accepts a well-formed spec', () =>
+    expect(() => validateReviewSpec(ok)).not.toThrow());
+  it('requires an absolute repoPath', () =>
+    expect(() => validateReviewSpec({ ...ok, repoPath: 'rel' })).toThrow(/absolute/));
+  it('requires a reviewId', () =>
+    expect(() => validateReviewSpec({ ...ok, reviewId: '' })).toThrow(/reviewId/));
+  it('rejects an unknown reviewType', () =>
+    expect(() => validateReviewSpec({ ...ok, reviewType: 'nope' as never })).toThrow(
+      /reviewType/,
+    ));
+  it('requires a non-empty target', () =>
+    expect(() => validateReviewSpec({ ...ok, target: '' })).toThrow(/target/));
+  it('rejects an unknown auth mode', () =>
+    expect(() => validateReviewSpec({ ...ok, auth: 'weird' as never })).toThrow(/auth/));
 });
