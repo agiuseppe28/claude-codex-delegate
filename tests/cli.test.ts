@@ -10,6 +10,7 @@ function handlers(over: Partial<CliHandlers> = {}): CliHandlers {
     doctor: vi.fn(() => Promise.resolve<DoctorReport>({ ok: true, rows: [] })),
     delegate: vi.fn(() => Promise.resolve(0)),
     refreshModels: vi.fn(() => Promise.resolve(0)),
+    review: vi.fn(() => Promise.resolve(0)),
     ...over,
   };
 }
@@ -62,6 +63,29 @@ describe('dispatch', () => {
     expect(h.doctor).not.toHaveBeenCalled();
     expect(h.delegate).not.toHaveBeenCalled();
     expect(h.refreshModels).not.toHaveBeenCalled();
+    expect(h.review).not.toHaveBeenCalled();
+  });
+
+  it('routes "review <specfile>" to review with reviewType code-review', async () => {
+    const h = handlers();
+    const code = await dispatch(['review', 'r.json'], h);
+    expect(h.review).toHaveBeenCalledWith('code-review', 'r.json');
+    expect(code).toBe(0);
+  });
+
+  it('routes "audit" and "plan-review" to their review types', async () => {
+    const h = handlers();
+    await dispatch(['audit', 'a.json'], h);
+    await dispatch(['plan-review', 'p.json'], h);
+    expect(h.review).toHaveBeenCalledWith('audit', 'a.json');
+    expect(h.review).toHaveBeenCalledWith('plan-review', 'p.json');
+  });
+
+  it('rejects a review subcommand with no spec file (usage, exit 1, no handler call)', async () => {
+    const h = handlers();
+    const code = await dispatch(['audit'], h);
+    expect(code).toBe(1);
+    expect(h.review).not.toHaveBeenCalled();
   });
 });
 
@@ -285,5 +309,101 @@ describe('preflight dirty-path filtering (tool ledger dir)', () => {
     });
     const facts = await realGatherPreflightFacts('/abs/repo', runner);
     expect(facts.dirtyPaths).toEqual(['src/a.ts']);
+  });
+});
+
+describe('runReview enforcement', () => {
+  const okAuditSpec = JSON.stringify({
+    reviewId: 'R1',
+    repoPath: '/abs/repo',
+    target: 'src/',
+  });
+
+  it('exits non-zero on an invalid spec without calling the controller', async () => {
+    const { runReview } = await import('../src/cli.js');
+    const review = vi.fn(() => Promise.resolve({ status: 'done' as const }));
+    const code = await runReview('audit', 'r.json', {
+      readSpecFile: () =>
+        JSON.stringify({ reviewId: 'R1', repoPath: '/abs/repo', target: '' }),
+      loadPolicy: () => {
+        throw new Error('should not be called');
+      },
+      isGitRepo: () => Promise.resolve(true),
+      reviewControllerReview: review,
+      print: () => {},
+    });
+    expect(code).not.toBe(0);
+    expect(review).not.toHaveBeenCalled();
+  });
+
+  it('rejects code-review on a non-git repo before running', async () => {
+    const { runReview } = await import('../src/cli.js');
+    const review = vi.fn(() => Promise.resolve({ status: 'done' as const }));
+    const code = await runReview('code-review', 'r.json', {
+      readSpecFile: () =>
+        JSON.stringify({ reviewId: 'R1', repoPath: '/abs/repo', target: 'HEAD' }),
+      loadPolicy: () => {
+        throw new Error('should not be called');
+      },
+      isGitRepo: () => Promise.resolve(false),
+      reviewControllerReview: review,
+      print: () => {},
+    });
+    expect(code).not.toBe(0);
+    expect(review).not.toHaveBeenCalled();
+  });
+
+  it('runs the controller and exits 0 on a done audit', async () => {
+    const { runReview } = await import('../src/cli.js');
+    const review = vi.fn(() =>
+      Promise.resolve({ status: 'done' as const, findings: 'ok' }),
+    );
+    const code = await runReview('audit', 'r.json', {
+      readSpecFile: () => okAuditSpec,
+      loadPolicy: () => ({
+        models: { m: { tier: 'flagship' as const } },
+        classes: {
+          mechanical: {
+            model: 'm',
+            effort: 'low' as const,
+            fallback: [],
+            timeout: '10m',
+          },
+        },
+        default: { class: 'mechanical' },
+        limits: { maxAttemptsPerTask: 4 },
+      }),
+      isGitRepo: () => Promise.resolve(true),
+      reviewControllerReview: review,
+      print: () => {},
+    });
+    expect(review).toHaveBeenCalledOnce();
+    expect(code).toBe(0);
+  });
+
+  it('exits non-zero when the review hands back', async () => {
+    const { runReview } = await import('../src/cli.js');
+    const review = vi.fn(() => Promise.resolve({ status: 'hand_back' as const }));
+    const code = await runReview('audit', 'r.json', {
+      readSpecFile: () => okAuditSpec,
+      loadPolicy: () => ({
+        models: { m: { tier: 'flagship' as const } },
+        classes: {
+          mechanical: {
+            model: 'm',
+            effort: 'low' as const,
+            fallback: [],
+            timeout: '10m',
+          },
+        },
+        default: { class: 'mechanical' },
+        limits: { maxAttemptsPerTask: 4 },
+      }),
+      isGitRepo: () => Promise.resolve(true),
+      reviewControllerReview: review,
+      print: () => {},
+    });
+    expect(review).toHaveBeenCalledOnce();
+    expect(code).not.toBe(0);
   });
 });

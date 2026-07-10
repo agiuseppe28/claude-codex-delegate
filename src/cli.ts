@@ -33,9 +33,18 @@ import type { DoctorDeps, DoctorReport, PolicyModelRef } from './doctor.js';
 import { readModelCatalog } from './exec/modelCatalog.js';
 import { proposePolicyDiff } from './refreshModels.js';
 import { evaluatePreflight, validateDelegationSpec } from './preflight.js';
+import { validateReviewSpec } from './preflight.js';
+import { ReviewController } from './reviewController.js';
+import type { ReviewOutcome } from './reviewController.js';
 import { localDir, resolvePolicyPath } from './config/paths.js';
 import { loadModelPolicy } from './config/modelPolicy.js';
-import type { ModelPolicy, DelegationSpec, Effort } from './config/types.js';
+import type {
+  ModelPolicy,
+  DelegationSpec,
+  Effort,
+  ReviewSpec,
+  ReviewType,
+} from './config/types.js';
 import { compileDenyList, isProtected } from './config/protectedPaths.js';
 import type { DenyList } from './config/protectedPaths.js';
 import { parsePorcelain } from './verify/diff.js';
@@ -48,6 +57,7 @@ export interface CliHandlers {
   doctor: () => Promise<DoctorReport>;
   delegate: (specFile: string) => Promise<number>;
   refreshModels: () => Promise<number>;
+  review: (reviewType: ReviewType, specFile: string) => Promise<number>;
 }
 
 /** Route argv[0] to a handler and translate its result into an exit code. */
@@ -72,9 +82,27 @@ export async function dispatch(
     }
     case 'refresh-models':
       return handlers.refreshModels();
+    case 'review':
+    case 'audit':
+    case 'plan-review': {
+      const specFile = rest[0];
+      if (!specFile) {
+        console.error(`usage: codex-delegate ${cmd} <specfile>`);
+        return 1;
+      }
+      // The subcommand IS the review type; `review` is the ergonomic alias for
+      // `code-review`. The spec file need not carry reviewType — it is injected.
+      // (In this shared case block cmd is narrowed to the three literals, so the
+      // else branch is already 'audit' | 'plan-review' — no assertion needed.)
+      const reviewType: ReviewType = cmd === 'review' ? 'code-review' : cmd;
+      return handlers.review(reviewType, specFile);
+    }
     default:
       console.error(`unknown subcommand: ${String(cmd)}`);
-      console.error('usage: codex-delegate <doctor|delegate <specfile>|refresh-models>');
+      console.error(
+        'usage: codex-delegate <doctor | delegate <specfile> | refresh-models | ' +
+          'review <specfile> | audit <specfile> | plan-review <specfile>>',
+      );
       return 1;
   }
 }
@@ -475,6 +503,88 @@ async function handleRefreshModels(): Promise<number> {
 }
 
 // ---------------------------------------------------------------------------
+// review / audit / plan-review: read-only judge path (no whitelist/clean-tree)
+// ---------------------------------------------------------------------------
+
+export interface ReviewDeps {
+  readSpecFile: (path: string) => string;
+  loadPolicy: (repoRoot: string) => ModelPolicy;
+  isGitRepo: (repoPath: string) => Promise<boolean>;
+  reviewControllerReview: (
+    spec: ReviewSpec,
+    policy: ModelPolicy,
+  ) => Promise<ReviewOutcome>;
+  print: (line: string) => void;
+}
+
+/**
+ * Fully injectable review handler. The subcommand determines the reviewType
+ * (injected onto the spec). There is deliberately NO whitelist/clean-tree
+ * preflight — a review writes nothing, and reviewing a dirty/in-progress tree is
+ * the point. `code-review` still requires a git repo (it diffs); audit and
+ * plan-review read a path/area or a plan file and do not.
+ */
+export async function runReview(
+  reviewType: ReviewType,
+  specFile: string,
+  deps: ReviewDeps,
+): Promise<number> {
+  let spec: Partial<ReviewSpec>;
+  try {
+    const raw = deps.readSpecFile(specFile);
+    spec = { ...(JSON.parse(raw) as Partial<ReviewSpec>), reviewType };
+    validateReviewSpec(spec);
+  } catch (err) {
+    deps.print(`invalid review spec: ${(err as Error).message}`);
+    return 1;
+  }
+  if (spec.reviewType === 'code-review' && !(await deps.isGitRepo(spec.repoPath))) {
+    deps.print('code-review requires a git repository (it reviews a diff)');
+    return 1;
+  }
+  const policy = deps.loadPolicy(spec.repoPath);
+  const outcome = await deps.reviewControllerReview(spec, policy);
+  deps.print(JSON.stringify(outcome));
+  if (outcome.status === 'hand_back' && outcome.lastError) {
+    console.error(`review: handed back — ${outcome.lastError}`);
+  }
+  return outcome.status === 'done' ? 0 : 1;
+}
+
+function buildReviewCollaborators(repoRoot: string): {
+  review: (spec: ReviewSpec, policy: ModelPolicy) => Promise<ReviewOutcome>;
+} {
+  const runner = defaultRunner;
+  const executor = new Executor(runner);
+  const multiAuth = new MultiAuth(runner);
+  const ledgerDir = localDir(repoRoot);
+  const ledgerFile = join(ledgerDir, 'ledger.jsonl');
+  const ledger = new Ledger((line: string) => {
+    if (!existsSync(ledgerDir)) mkdirSync(ledgerDir, { recursive: true });
+    appendFileSync(ledgerFile, line);
+  });
+  const controller = new ReviewController({
+    runner,
+    executor,
+    multiAuth,
+    ledger,
+    now: (): string => new Date().toISOString(),
+  });
+  return { review: (spec, policy) => controller.review(spec, policy) };
+}
+
+async function handleReview(reviewType: ReviewType, specFile: string): Promise<number> {
+  return runReview(reviewType, specFile, {
+    readSpecFile: (path) => readFileSync(path, 'utf8'),
+    loadPolicy: realLoadPolicy,
+    isGitRepo: async (repoPath) => (await realGatherPreflightFacts(repoPath)).isGitRepo,
+    reviewControllerReview: (spec, policy) =>
+      buildReviewCollaborators(spec.repoPath).review(spec, policy),
+    print: (line) => console.log(line),
+  });
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
@@ -483,6 +593,7 @@ async function main(): Promise<void> {
     doctor: handleDoctor,
     delegate: handleDelegate,
     refreshModels: handleRefreshModels,
+    review: handleReview,
   });
   process.exit(code);
 }
