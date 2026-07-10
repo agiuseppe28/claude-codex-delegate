@@ -38,8 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   row flags older CLIs). The 5.6 slugs were verified runnable on a ChatGPT-auth
   account on 2026-07-10.
 - `model-policy.toml` schema: models may carry an `efforts` array; a `[review]`
-  section is recognized. Older local overrides without `efforts` still load
-  (validation is skipped for those models, with a doctor `WARN`).
+  section is recognized. Older local overrides without `efforts` still load —
+  the loader simply skips `(model, effort)` validation for those models. The
+  live-catalog `models` doctor row still validates each referenced slug/effort
+  against `codex debug models` regardless of whether the policy declares
+  `efforts`. (A dedicated doctor warning nudging users to declare `efforts` is
+  planned but not yet implemented.)
 
 ### Known limitations
 
