@@ -53,4 +53,72 @@ describe('runDoctor', () => {
     expect(routing?.remediation).toContain('rotation disable');
     expect(report.ok).toBe(false);
   });
+
+  it('reports MISSING when a policy slug is absent from the catalog', async () => {
+    const report = await runDoctor(
+      deps({
+        readModelCatalog: () =>
+          Promise.resolve([
+            { slug: 'gpt-5.6-terra', efforts: ['high'], visibility: 'list' },
+          ]),
+        policyModelRefs: () => [
+          { label: 'class hard', slug: 'gpt-5.6-sol', effort: 'high' },
+        ],
+      }),
+    );
+    expect(report.rows.find((r) => r.check === 'models')?.status).toBe('missing');
+    expect(report.ok).toBe(false);
+  });
+
+  it('reports WARN (misconfigured) when an effort is unsupported by the slug', async () => {
+    const report = await runDoctor(
+      deps({
+        readModelCatalog: () =>
+          Promise.resolve([
+            { slug: 'gpt-5.6-luna', efforts: ['low', 'medium'], visibility: 'list' },
+          ]),
+        policyModelRefs: () => [
+          { label: 'class mechanical', slug: 'gpt-5.6-luna', effort: 'ultra' },
+        ],
+      }),
+    );
+    expect(report.rows.find((r) => r.check === 'models')?.status).toBe('misconfigured');
+  });
+
+  it('reports models OK when every ref is present with a supported effort', async () => {
+    const report = await runDoctor(
+      deps({
+        readModelCatalog: () =>
+          Promise.resolve([
+            { slug: 'gpt-5.6-sol', efforts: ['high'], visibility: 'list' },
+          ]),
+        policyModelRefs: () => [
+          { label: 'class hard', slug: 'gpt-5.6-sol', effort: 'high' },
+        ],
+      }),
+    );
+    expect(report.rows.find((r) => r.check === 'models')?.status).toBe('ok');
+  });
+
+  it('warns when a newer CLI is known than the one running', async () => {
+    const report = await runDoctor(
+      deps({
+        readCliVersion: () =>
+          Promise.resolve({ current: '0.142.5', latestKnown: '0.144.1' }),
+      }),
+    );
+    expect(report.rows.find((r) => r.check === 'cli-version')?.status).toBe(
+      'misconfigured',
+    );
+  });
+
+  it('is ok when the running CLI is at least the latest known', async () => {
+    const report = await runDoctor(
+      deps({
+        readCliVersion: () =>
+          Promise.resolve({ current: '0.144.1', latestKnown: '0.144.1' }),
+      }),
+    );
+    expect(report.rows.find((r) => r.check === 'cli-version')?.status).toBe('ok');
+  });
 });

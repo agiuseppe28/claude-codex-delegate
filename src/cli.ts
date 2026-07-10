@@ -29,7 +29,8 @@ import { Ledger } from './ledger.js';
 import { Controller } from './controller.js';
 import type { Outcome } from './controller.js';
 import { runDoctor } from './doctor.js';
-import type { DoctorDeps, DoctorReport } from './doctor.js';
+import type { DoctorDeps, DoctorReport, PolicyModelRef } from './doctor.js';
+import { readModelCatalog } from './exec/modelCatalog.js';
 import { evaluatePreflight, validateDelegationSpec } from './preflight.js';
 import { localDir, resolvePolicyPath } from './config/paths.js';
 import { loadModelPolicy } from './config/modelPolicy.js';
@@ -110,6 +111,27 @@ async function which(bin: string, runner: Runner = defaultRunner): Promise<boole
 async function buildDoctorDeps(repoRoot: string): Promise<DoctorDeps> {
   const codexPresent = await which('codex');
   const multiAuthPresent = await which('codex-multi-auth');
+  // Flatten the active policy's classes + review into (label, slug, effort)
+  // triples once. A broken/unreadable policy yields no refs (the `models` row is
+  // then simply skipped) rather than crashing doctor.
+  let policyRefs: PolicyModelRef[] = [];
+  try {
+    const policy = realLoadPolicy(repoRoot);
+    policyRefs = [
+      ...Object.entries(policy.classes).map(([name, c]) => ({
+        label: `class ${name}`,
+        slug: c.model,
+        effort: c.effort,
+      })),
+      ...Object.entries(policy.review ?? {}).map(([name, c]) => ({
+        label: `review ${name}`,
+        slug: c.model,
+        effort: c.effort,
+      })),
+    ];
+  } catch {
+    policyRefs = [];
+  }
   return {
     which: (bin: string) => (bin === 'codex' ? codexPresent : multiAuthPresent),
     policyExists: () =>
@@ -119,7 +141,33 @@ async function buildDoctorDeps(repoRoot: string): Promise<DoctorDeps> {
       return status.accountCount > 0;
     },
     checkProviderRouting: probeGlobalCodexRouting,
+    readModelCatalog: () => readModelCatalog(defaultRunner),
+    policyModelRefs: () => policyRefs,
+    readCliVersion: readCliVersion,
   };
+}
+
+/**
+ * Running CLI version (`codex --version` → last whitespace-delimited token) and
+ * the newest version recorded locally (`$CODEX_HOME/version.json`). Both are
+ * best-effort: any failure yields `latestKnown: null`, so the row stays quiet
+ * rather than false-warning.
+ */
+async function readCliVersion(): Promise<{
+  current: string;
+  latestKnown: string | null;
+}> {
+  const out = await defaultRunner('codex', ['--version']);
+  const current = out.stdout.trim().split(/\s+/).pop() ?? '0.0.0';
+  let latestKnown: string | null = null;
+  try {
+    const raw = readFileSync(join(CODEX_HOME(), 'version.json'), 'utf8');
+    const parsed = JSON.parse(raw) as { latest_version?: unknown };
+    if (typeof parsed.latest_version === 'string') latestKnown = parsed.latest_version;
+  } catch {
+    latestKnown = null;
+  }
+  return { current, latestKnown };
 }
 
 const CODEX_HOME = (): string => process.env.CODEX_HOME ?? join(homedir(), '.codex');
